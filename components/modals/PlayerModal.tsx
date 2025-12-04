@@ -184,6 +184,21 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose }) => 
                 {/* Right Column: Contract & Info */}
                 <div className="lg:col-span-1 space-y-6">
                     <div className="bg-neutral-950/50 p-5 rounded-lg border border-neutral-800">
+                        <h3 className="text-purple-500 font-bold uppercase text-sm tracking-widest mb-4 border-b border-neutral-800 pb-2">Dynamic Roles</h3>
+                        <div className="flex flex-wrap gap-2">
+                            {player.roles && player.roles.length > 0 ? (
+                                player.roles.map(role => (
+                                    <span key={role} className="px-2 py-1 bg-purple-900/30 border border-purple-500/30 text-purple-200 text-[10px] uppercase font-bold rounded tracking-wider shadow-sm">
+                                        {role}
+                                    </span>
+                                ))
+                            ) : (
+                                <span className="text-xs text-neutral-600 italic">No specialized roles yet.</span>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="bg-neutral-950/50 p-5 rounded-lg border border-neutral-800">
                         <h3 className="text-yellow-500 font-bold uppercase text-sm tracking-widest mb-4 border-b border-neutral-800 pb-2">Contract & Value</h3>
                         <div className="grid grid-cols-1 gap-3">
                             <StatBox label="Market Value" value={formatMillions(player.market_value)} highlight />

@@ -12,6 +12,34 @@ export enum View {
   SETTINGS = 'settings'
 }
 
+export enum PlayerRole {
+  // Tier 1: Foundation
+  ACADEMY_GRADUATE = 'Academy Graduate',
+  EMERGING_TALENT = 'Emerging Talent',
+  SQUAD_PLAYER = 'Squad Player',
+  WORKHORSE = 'Workhorse',
+
+  // Tier 2: Established
+  CONSISTENT_PERFORMER = 'Consistent Performer',
+  MENTOR = 'Mentor',
+  FAN_FAVORITE = 'Fan Favorite',
+  CLUTCH_PLAYER = 'Clutch Player',
+  TACTICAL_ANCHOR = 'Tactical Anchor',
+
+  // Tier 3: Elite
+  TEAM_LEADER = 'Team Leader',
+  FRANCHISE_PLAYER = 'Franchise Player',
+  CLUB_ICON = 'Club Icon',
+  LEGACY_LEGEND = 'Legacy Legend',
+
+  // Specialized
+  WILDCARD = 'Wildcard',
+  ENFORCER = 'Enforcer',
+  CAPTAIN_MATERIAL = 'Captain Material',
+  SUPER_SUB = 'Super Sub',
+  VETERAN_PRESENCE = 'Veteran Presence'
+}
+
 export interface PlayerAttributes {
   pace: number;
   shooting: number;
@@ -80,6 +108,8 @@ export interface Player {
   clubId: number;
   season_stats: PlayerStats;
   competition_stats: { [key: string]: PlayerStats };
+  roles: PlayerRole[];
+  years_at_club: number;
 }
 
 export interface ClubFacilities {
@@ -172,6 +202,23 @@ export interface SeasonFinancials {
   charity_contributions: number;
 }
 
+export interface FinancialStrategy {
+  ticket_pricing: 'very_low' | 'low' | 'normal' | 'high' | 'very_high';
+  merchandise_focus: 'local' | 'national' | 'global';
+  debt_repayment: 'minimum' | 'balanced' | 'aggressive';
+  wage_budget_allocation: number; // 40-80%
+}
+
+export interface ScoutAssignment {
+    id: string;
+    region: 'UK' | 'Europe' | 'South America' | 'Asia' | 'Global';
+    position: 'GK' | 'DEF' | 'MID' | 'FWD' | 'ALL';
+    scope: 'youth' | 'first_team';
+    weeks_remaining: number;
+    assigned_scout_id: number;
+    reports: number[];
+}
+
 export interface Trophy {
   id: number;
   name: string;
@@ -186,6 +233,9 @@ export interface Tactics {
     passing_directness: number;
     pressing_intensity: number;
     tempo: number;
+    attacking_width: number;
+    creative_freedom: number;
+    tackling_style: number;
   };
   lineup: number[];
   familiarity: number;
@@ -222,6 +272,7 @@ export interface Club {
   scouting: {
     network_quality: number;
     range: "local" | "national" | "continental" | "global";
+    assignments: ScoutAssignment[];
   };
   owner: {
     ambition: number;
@@ -254,6 +305,7 @@ export interface Club {
   };
   tactics?: Tactics;
   tactical_familiarity: number; // 0-100
+  financial_strategy: FinancialStrategy;
   staff: StaffMember[];
   rivalries: number[];
   players: Player[];
@@ -389,6 +441,14 @@ export interface Negotiation {
   last_updated: string;
   next_response_date: string;
   agent_comments?: string;
+  dialogue_history?: NegotiationDialogue[];
+}
+
+export interface NegotiationDialogue {
+    speaker: 'agent' | 'club';
+    text: string;
+    sentiment: 'positive' | 'negative' | 'neutral';
+    timestamp: number;
 }
 
 export interface TransferOffer {
@@ -402,6 +462,9 @@ export interface ContractOffer {
   duration: number;
   signing_bonus: number;
   role: "key" | "star" | "important" | "rotation" | "prospect";
+  release_clause?: number;
+  performance_bonus?: number;
+  yearly_wage_rise?: number;
 }
 
 export interface StaffMember {
