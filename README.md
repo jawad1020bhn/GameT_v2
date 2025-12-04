@@ -1,20 +1,53 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Premiere Manager: Enterprise Edition
 
-# Run and deploy your AI Studio app
+A high-fidelity football management simulation engine built with React, TypeScript, and Vite. This project focuses on realistic data modeling, dynamic player evolution, and a living game world.
 
-This contains everything you need to run your app locally.
+## 🚀 Features
 
-View your app in AI Studio: https://ai.studio/apps/drive/17bIoQnmBydtN4kw1oCroVxNScFSIv7bl
+### 1. Dynamic Team Role System (DTRS)
+A comprehensive framework for player development and squad hierarchy.
+- **Tier 1 (Foundation):** Academy Graduate, Emerging Talent, Squad Player, Workhorse.
+- **Tier 2 (Established):** Consistent Performer, Mentor, Fan Favorite, Clutch Player, Tactical Anchor.
+- **Tier 3 (Elite):** Team Leader, Franchise Player, Club Icon, Legacy Legend.
+- **Specialized:** Wildcard, Enforcer, Captain Material, Super Sub, Veteran Presence.
+- **Effects:** Roles dynamically influence Match Revenue, Merchandise Sales, Training Efficiency, Injury Resistance, and Tactical Adaptability.
 
-## Run Locally
+### 2. High-Performance Simulation Engine
+- **No Artificial Delays:** Simulation speed is bounded only by calculation time.
+- **Calendar-Based Progression:** Visualizes day-by-day advancement rather than arbitrary percentage bars.
+- **Zero-Blocking UI:** Uses efficient yielding to keep the interface responsive during heavy processing seasons.
 
-**Prerequisites:**  Node.js
+### 3. Living World & Data Integrity
+- **Procedural Generation:** Automatically fills incomplete squads with procedurally generated players to ensure valid competitions.
+- **Dynamic Evolution:** Players grow and decline daily based on potential, age, and active Roles.
+- **Financial Ecosystem:** Tracks wages, transfer budgets, merchandise income (boosted by Franchise Players/Fan Favorites), and facility maintenance.
 
+### 4. Heartbeat Match Engine
+- **Tactical Depth:** Interactions between formations and instructions (High Line vs Counter Attack).
+- **Environmental Factors:** Weather effects (Rain, Snow, Heat) influence stamina and passing.
+- **Role Integration:** "Home Atmosphere" bonuses from Fan Favorites, "Defensive Organization" from Tactical Anchors.
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## 🛠️ Tech Stack
+- **Frontend:** React 19, TailwindCSS
+- **Build Tool:** Vite
+- **Language:** TypeScript
+- **State Management:** React Context API + useReducer
+
+## 🎮 How to Run
+
+1.  **Install Dependencies:**
+    ```bash
+    npm install
+    ```
+
+2.  **Start Development Server:**
+    ```bash
+    npm run dev
+    ```
+
+3.  **Open in Browser:**
+    Navigate to `http://localhost:5173` (or the port shown in terminal).
+
+## 📋 System Requirements
+- Node.js (v18 or higher recommended)
+- npm (v9 or higher)

@@ -1,7 +1,8 @@
-import { GameState, League, Club, Fixture, GameMessage, Player, NewsItem, Trophy, Negotiation, TransferOffer, View, MatchEvent, FacilityDetails, ContractOffer, Tactics, SeasonFinancials, GalaData } from '../types';
+import { GameState, League, Club, Fixture, GameMessage, Player, NewsItem, Trophy, Negotiation, TransferOffer, View, MatchEvent, FacilityDetails, ContractOffer, Tactics, SeasonFinancials, GalaData, PlayerRole } from '../types';
 import { generateFixtures, injectCupFixtures, getSeasonDates, generatePlayer, getRandomName } from '../constants';
 import { NewsEngine } from './news_engine';
 import { AdvancedEngine } from './advanced_engine';
+import { RoleService } from './RoleService';
 
 // Helper to add days to a YYYY-MM-DD string
 export const addDays = (dateStr: string, days: number): string => {
@@ -265,8 +266,12 @@ const getZoneControl = (club: Club): number => {
 const resolveDuel = (attacker: Player, defender: Player): 'win' | 'loss' | 'foul' => {
     const attackerScore = (attacker.attributes.dribbling * 0.4) + (attacker.attributes.pace * 0.4) + (attacker.attributes.mental * 0.2) + (attacker.form > 80 ? 5 : 0);
     const defenderScore = (defender.attributes.defending * 0.5) + (defender.attributes.physical * 0.3) + (defender.attributes.mental * 0.2);
-    const variance = Math.random() * 20 - 10;
-    if (attackerScore + variance > defenderScore) return 'win';
+
+    // Sigmoid Probability for realistic outcomes
+    const diff = attackerScore - defenderScore;
+    const winProb = 1 / (1 + Math.exp(-diff / 8));
+
+    if (Math.random() < winProb) return 'win';
     if (defender.attributes.physical > 80 && Math.random() < 0.1) return 'foul';
     return 'loss';
 };
@@ -306,8 +311,13 @@ const simulateMatch = (home: Club, away: Club, strictness: number, isKnockout: b
     const homeControl = getZoneControl(home);
     const awayControl = getZoneControl(away);
 
+    const homeMods = RoleService.getClubRoleModifiers(home);
+    const awayMods = RoleService.getClubRoleModifiers(away);
+
     // Apply Tactical Advantage
-    const tacAdv = getTacticalAdvantage(home.tactics, away.tactics);
+    let tacAdv = getTacticalAdvantage(home.tactics, away.tactics);
+    tacAdv += (homeMods.tacticalAdaptability || 0) * 10;
+    tacAdv -= (awayMods.tacticalAdaptability || 0) * 10;
 
     // Weather Effects
     let passingMod = 1.0;
@@ -324,6 +334,13 @@ const simulateMatch = (home: Club, away: Club, strictness: number, isKnockout: b
     let awayChanceMod = 1.0;
     let homeCardMod = 1.0;
     let awayCardMod = 1.0;
+
+    // Role Effects: Home Atmosphere
+    homeChanceMod += (homeMods.homeAtmosphere || 0);
+
+    // Role Effects: Defensive Organization (reduces opponent chances)
+    homeChanceMod -= (awayMods.defensiveOrganization || 0) * 0.5;
+    awayChanceMod -= (homeMods.defensiveOrganization || 0) * 0.5;
 
     if (home.tactics) {
         homeChanceMod += (home.tactics.instructions.passing_directness - 50) / 200; // More direct = slightly more chances but less control
@@ -454,6 +471,8 @@ const updatePlayersDaily = (club: Club, playedMatch: boolean, competition?: stri
     const tacticalBoost = assistant ? (assistant.attributes.coaching / 100) * 0.5 : 0.1;
     const healingBoost = physio ? (physio.attributes.healing / 100) * 0.2 : 0;
 
+    const clubMods = RoleService.getClubRoleModifiers(club);
+
     // Increase Tactical Familiarity if match played
     if (playedMatch && club.tactics) {
         club.tactics.familiarity = Math.min(100, club.tactics.familiarity + 0.5 + tacticalBoost);
@@ -499,8 +518,29 @@ const updatePlayersDaily = (club: Club, playedMatch: boolean, competition?: stri
             p.condition = Math.max(10, p.condition - 30); // Major condition hit after match
             p.form = Math.min(100, Math.max(0, p.form + (Math.random() * 10 - 5)));
         } else {
-            p.fitness = Math.min(100, p.fitness + 8 + Math.random() * 3 + fitnessRecovery);
+            // Apply Stamina Decline reduction (from Workhorse/Squad Player)
+            const roleDef = p.roles ? p.roles.map(r => RoleService.getRoleDefinition(r).modifiers(p)) : [];
+            const staminaRecoveryBonus = roleDef.reduce((sum, m) => sum + (m.staminaDecline || 0), 0);
+
+            p.fitness = Math.min(100, p.fitness + 8 + Math.random() * 3 + fitnessRecovery + (staminaRecoveryBonus * 5));
             p.condition = Math.min(100, p.condition + 20 + fitnessRecovery); // Recover condition fast
+
+            // Training Growth (Dynamic Evolution - Performance Based)
+            const personalDevMod = roleDef.reduce((sum, m) => sum + (m.developmentSpeed || 0), 0);
+            const formFactor = Math.max(0.5, p.form / 60);
+            const ratingFactor = p.season_stats.appearances > 0 ? Math.max(0.8, p.season_stats.avg_rating / 6.5) : 1.0;
+
+            const growthChance = 0.02 * (1 + (clubMods.teamTrainingEfficiency || 0) + personalDevMod) * formFactor * ratingFactor;
+
+            if (p.overall < p.potential && Math.random() < growthChance) {
+                const keys = Object.keys(p.attributes) as (keyof typeof p.attributes)[];
+                const key = keys[Math.floor(Math.random() * keys.length)];
+                if (p.attributes[key] < 99) {
+                    p.attributes[key]++;
+                    // Small chance to bump overall
+                    if (Math.random() < 0.1) p.overall++;
+                }
+            }
         }
 
         if (p.injury_status.type !== "none") {
@@ -510,8 +550,11 @@ const updatePlayersDaily = (club: Club, playedMatch: boolean, competition?: stri
                 p.injury_status.weeks_remaining = 0;
             }
         } else {
+            const roleDef = p.roles ? p.roles.map(r => RoleService.getRoleDefinition(r).modifiers(p)) : [];
+            const injuryResist = roleDef.reduce((sum, m) => sum + (m.injuryResistance || 0), 0);
+
             const redZoneMult = p.fitness < 75 ? 4 : 1;
-            if (Math.random() < 0.0005 * p.injury_status.proneness * redZoneMult * (1 - injuryReduction)) {
+            if (Math.random() < 0.0005 * p.injury_status.proneness * redZoneMult * (1 - injuryReduction) * (1 - injuryResist)) {
                 p.injury_status.type = "hamstring";
                 p.injury_status.weeks_remaining = 2 + Math.floor(Math.random() * 4);
             }
@@ -966,6 +1009,7 @@ export const transitionSeason = (state: GameState): GameState => {
         league.clubs.forEach(c => {
             c.players.forEach(p => {
                 p.age += 1;
+                p.years_at_club = (p.years_at_club || 0) + 1;
                 if (p.age < 24 && p.potential > p.overall) p.overall = Math.min(p.potential, p.overall + Math.floor(Math.random() * 3) + 1);
                 else if (p.age > 31) p.overall = Math.max(40, p.overall - 2);
             });
@@ -1248,10 +1292,45 @@ export const processDay = (state: GameState): { newState: GameState, events: str
                 updatePlayersDaily(c, false, null);
             }
 
+            // Check Role Progression (Weekly on Mondays)
+            if (new Date(state.currentDate).getDay() === 1) {
+                c.players.forEach(p => {
+                    const { added } = RoleService.updatePlayerRoles(p, c);
+                    if (added.length > 0 && c.id === state.playerClubId) {
+                         added.forEach(role => {
+                             const def = RoleService.getRoleDefinition(role);
+                             if (def.tier >= 2) {
+                                 newNews.push({
+                                     id: Date.now() + Math.random(),
+                                     date: state.currentDate,
+                                     headline: `${p.name.toUpperCase()} DEVELOPS AS ${role.toUpperCase()}`,
+                                     content: `${p.name} has been recognized as a ${role} due to their recent performances and status within the club.`,
+                                     image_type: 'general',
+                                     clubId: c.id
+                                 });
+                             }
+                         });
+                    }
+                });
+            }
+
+            const roleMods = RoleService.getClubRoleModifiers(c);
+
             // Daily Wages
             const dailyWages = c.wage_budget_weekly / 7;
             c.budget -= dailyWages;
             c.season_financials.wage_bill += dailyWages;
+
+            // Daily Merchandise (Deterministic + Spike)
+            const dailyMerch = (c.fanbase_size * 0.02) * (1 + (roleMods.merchandiseSales || 0));
+            c.budget += dailyMerch;
+            c.season_financials.merchandise_income += dailyMerch;
+
+            if (playedTodayLocal) {
+                const matchDaySpike = dailyMerch * 15;
+                c.budget += matchDaySpike;
+                c.season_financials.merchandise_income += matchDaySpike;
+            }
         });
 
         const takeover = generateTakeover(league.clubs);
