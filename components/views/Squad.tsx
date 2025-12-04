@@ -224,7 +224,10 @@ const TacticalBoard = ({ club, onUpdate }: { club: any, onUpdate: (t: any) => vo
                             { id: 'pressing_intensity', label: 'Pressing Intensity', minLabel: 'Stand Off', maxLabel: 'Gegenpress' },
                             { id: 'tempo', label: 'Tempo', minLabel: 'Patient', maxLabel: 'Urgent' },
                             { id: 'passing_directness', label: 'Passing Directness', minLabel: 'Short', maxLabel: 'Long' },
-                            { id: 'line_height', label: 'Defensive Line', minLabel: 'Deep', maxLabel: 'High' }
+                            { id: 'line_height', label: 'Defensive Line', minLabel: 'Deep', maxLabel: 'High' },
+                            { id: 'attacking_width', label: 'Attacking Width', minLabel: 'Narrow', maxLabel: 'Wide' },
+                            { id: 'creative_freedom', label: 'Creative Freedom', minLabel: 'Disciplined', maxLabel: 'Expressive' },
+                            { id: 'tackling_style', label: 'Tackling Aggression', minLabel: 'Cautious', maxLabel: 'Aggressive' }
                         ].map(setting => (
                             <div key={setting.id}>
                                 <div className="flex justify-between text-xs font-bold text-neutral-400 uppercase mb-2">

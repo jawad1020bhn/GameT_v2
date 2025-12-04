@@ -2,7 +2,9 @@ import React, { createContext, useContext, useReducer, ReactNode, useState, useE
 import { GameState, League, Club, GameMessage, View, NewsItem, Negotiation, TransferOffer, Tactics, ManagerProfile } from '../types';
 import { INITIAL_LEAGUES_DATA, INITIAL_DATE, START_YEAR } from '../constants';
 import { REAL_WORLD_LEAGUES } from '../services/real_world_data';
+import { DataIntegrityService } from '../services/DataIntegrityService';
 import { processDay, addDays, calculatePlayerValue, transitionSeason } from '../services/engine';
+import { NegotiationEngine } from '../services/NegotiationEngine';
 
 type Action =
     | { type: 'START_GAME'; payload: { clubId: number } }
@@ -11,7 +13,7 @@ type Action =
     | { type: 'SET_SIMULATION'; payload: Partial<GameState['simulation']> }
     | { type: 'MARK_READ'; payload: number }
     | { type: 'START_NEGOTIATION'; payload: { playerId: number, sellingClubId: number } }
-    | { type: 'SUBMIT_OFFER'; payload: { negotiationId: string, offer: TransferOffer } }
+    | { type: 'SUBMIT_OFFER'; payload: { negotiationId: string, offer: TransferOffer | ContractOffer } }
     | { type: 'WITHDRAW_NEGOTIATION'; payload: string }
     | { type: 'UPDATE_TACTICS'; payload: Partial<Tactics> }
     | { type: 'APPLY_SHOUT'; payload: { type: Tactics['temporary_boost']['type'] } }
@@ -59,7 +61,8 @@ const initialState: GameState = {
     leagues: (() => {
         // Transform array to object map
         const leagueMap: { [key: string]: League } = {};
-        REAL_WORLD_LEAGUES.forEach(l => {
+        const processedLeagues = DataIntegrityService.processLeagues(REAL_WORLD_LEAGUES);
+        processedLeagues.forEach(l => {
             leagueMap[l.name] = l;
         });
         return leagueMap;
@@ -177,10 +180,46 @@ const gameReducer = (state: GameState, action: Action): GameState => {
                 ...state,
                 negotiations: state.negotiations.map(n => {
                     if (n.id === action.payload.negotiationId) {
+                        const player = Object.values(state.leagues).flatMap(l => l.clubs).flatMap(c => c.players).find(p => p.id === n.playerId);
+                        if (!player) return n;
+
+                        let result;
+                        let response;
+
+                        if (n.stage === 'club_fee') {
+                            result = NegotiationEngine.evaluateFee(n, action.payload.offer as TransferOffer);
+                            response = NegotiationEngine.generateResponse(player, 'club_fee', result.quality);
+                        } else {
+                            result = NegotiationEngine.evaluateContract(n, action.payload.offer as ContractOffer);
+                            response = NegotiationEngine.generateResponse(player, 'contract', result.quality);
+                        }
+
+                        const offerText = n.stage === 'club_fee'
+                            ? `Fee: £${((action.payload.offer as TransferOffer).fee / 1000000).toFixed(1)}M`
+                            : `Wage: £${((action.payload.offer as ContractOffer).wage).toLocaleString()}/wk`;
+
+                        const newHistory = [
+                            ...(n.dialogue_history || []),
+                            {
+                                speaker: 'club' as const,
+                                text: `Offer Submitted: ${offerText}`,
+                                sentiment: 'neutral' as const,
+                                timestamp: Date.now()
+                            },
+                            {
+                                speaker: 'agent' as const,
+                                text: response.text,
+                                sentiment: response.sentiment,
+                                timestamp: Date.now() + 1
+                            }
+                        ];
+
                         return {
                             ...n,
                             latest_offer: action.payload.offer,
-                            next_response_date: addDays(state.currentDate, 1),
+                            status: result.status,
+                            ai_valuation: { ...n.ai_valuation!, patience: Math.max(0, (n.ai_valuation?.patience || 100) - result.patienceHit) },
+                            dialogue_history: newHistory,
                             last_updated: state.currentDate
                         };
                     }
@@ -291,25 +330,24 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 isActive: true,
                 type: days === 1 ? 'day' : 'week',
                 progress: 0,
-                statusText: 'Initializing Engine...',
+                statusText: 'Processing...',
                 recentEvents: []
             }
         });
 
         let currentState = state;
-        const delay = days === 1 ? 1000 : 800;
 
         for (let i = 0; i < days; i++) {
+            // Backend Optimization: Yield to event loop to allow UI repaint, but no artificial delay
+            await new Promise(resolve => setTimeout(resolve, 0));
+
             dispatch({
                 type: 'SET_SIMULATION',
                 payload: {
                     progress: (i / days) * 100,
-                    statusText: `Simulating ${currentState.currentDate}: Matches...`
+                    statusText: `Simulating ${currentState.currentDate}`
                 }
             });
-
-            // Visual weight: Delay for match sim
-            await new Promise(resolve => setTimeout(resolve, delay * 0.3));
 
             // Process Shouts via Ref
             const latestGlobalState = stateRef.current;
@@ -327,16 +365,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 });
             }
 
-            // Run Logic
+            // Run Logic (Optimized: No throttling)
             const result = processDay(currentState);
             currentState = result.newState;
-
-            // Visual weight: Transfer Market & Growth
-            dispatch({ payload: { statusText: `Simulating ${currentState.currentDate}: Transfer Market...` } });
-            await new Promise(resolve => setTimeout(resolve, delay * 0.3));
-
-            dispatch({ payload: { statusText: `Simulating ${currentState.currentDate}: Player Growth...` } });
-            await new Promise(resolve => setTimeout(resolve, delay * 0.4));
 
             dispatch({
                 type: 'SET_SIMULATION',
@@ -353,12 +384,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             }
         }
 
-        dispatch({
-            type: 'SET_SIMULATION',
-            payload: { progress: 100, statusText: 'Finalizing Data...' }
-        });
-        await new Promise(resolve => setTimeout(resolve, 500));
-
+        // Finalize immediately
         dispatch({ type: 'UPDATE_STATE', payload: currentState });
         dispatch({ type: 'SET_SIMULATION', payload: { isActive: false } });
     };
