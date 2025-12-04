@@ -2,6 +2,7 @@ import React, { createContext, useContext, useReducer, ReactNode, useState, useE
 import { GameState, League, Club, GameMessage, View, NewsItem, Negotiation, TransferOffer, Tactics, ManagerProfile } from '../types';
 import { INITIAL_LEAGUES_DATA, INITIAL_DATE, START_YEAR } from '../constants';
 import { REAL_WORLD_LEAGUES } from '../services/real_world_data';
+import { DataIntegrityService } from '../services/DataIntegrityService';
 import { processDay, addDays, calculatePlayerValue, transitionSeason } from '../services/engine';
 
 type Action =
@@ -59,7 +60,8 @@ const initialState: GameState = {
     leagues: (() => {
         // Transform array to object map
         const leagueMap: { [key: string]: League } = {};
-        REAL_WORLD_LEAGUES.forEach(l => {
+        const processedLeagues = DataIntegrityService.processLeagues(REAL_WORLD_LEAGUES);
+        processedLeagues.forEach(l => {
             leagueMap[l.name] = l;
         });
         return leagueMap;

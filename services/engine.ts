@@ -501,6 +501,17 @@ const updatePlayersDaily = (club: Club, playedMatch: boolean, competition?: stri
         } else {
             p.fitness = Math.min(100, p.fitness + 8 + Math.random() * 3 + fitnessRecovery);
             p.condition = Math.min(100, p.condition + 20 + fitnessRecovery); // Recover condition fast
+
+            // Training Growth (Dynamic Evolution)
+            if (p.overall < p.potential && Math.random() < 0.02) { // 2% chance per day
+                const keys = Object.keys(p.attributes) as (keyof typeof p.attributes)[];
+                const key = keys[Math.floor(Math.random() * keys.length)];
+                if (p.attributes[key] < 99) {
+                    p.attributes[key]++;
+                    // Small chance to bump overall
+                    if (Math.random() < 0.1) p.overall++;
+                }
+            }
         }
 
         if (p.injury_status.type !== "none") {
