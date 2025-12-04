@@ -1,0 +1,11 @@
+System Requirements:
+- Node.js >= 18.0.0
+- npm >= 9.0.0
+
+Project Dependencies (Managed via package.json):
+- react >= 19.2.0
+- react-dom >= 19.2.0
+- recharts
+- vite
+- typescript
+- tailwindcss
