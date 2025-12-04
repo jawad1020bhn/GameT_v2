@@ -1,7 +1,9 @@
-import { GameState, League, Club, Fixture, GameMessage, Player, NewsItem, Trophy, Negotiation, TransferOffer, View, MatchEvent, FacilityDetails, ContractOffer, Tactics, SeasonFinancials, GalaData } from '../types';
+import { GameState, League, Club, Fixture, GameMessage, Player, NewsItem, Trophy, Negotiation, TransferOffer, View, MatchEvent, FacilityDetails, ContractOffer, Tactics, SeasonFinancials, GalaData, PlayerRole } from '../types';
 import { generateFixtures, injectCupFixtures, getSeasonDates, generatePlayer, getRandomName } from '../constants';
 import { NewsEngine } from './news_engine';
 import { AdvancedEngine } from './advanced_engine';
+import { RoleService } from './RoleService';
+import { FinancialEngine } from './FinancialEngine';
 
 // Helper to add days to a YYYY-MM-DD string
 export const addDays = (dateStr: string, days: number): string => {
@@ -265,8 +267,12 @@ const getZoneControl = (club: Club): number => {
 const resolveDuel = (attacker: Player, defender: Player): 'win' | 'loss' | 'foul' => {
     const attackerScore = (attacker.attributes.dribbling * 0.4) + (attacker.attributes.pace * 0.4) + (attacker.attributes.mental * 0.2) + (attacker.form > 80 ? 5 : 0);
     const defenderScore = (defender.attributes.defending * 0.5) + (defender.attributes.physical * 0.3) + (defender.attributes.mental * 0.2);
-    const variance = Math.random() * 20 - 10;
-    if (attackerScore + variance > defenderScore) return 'win';
+
+    // Sigmoid Probability for realistic outcomes
+    const diff = attackerScore - defenderScore;
+    const winProb = 1 / (1 + Math.exp(-diff / 8));
+
+    if (Math.random() < winProb) return 'win';
     if (defender.attributes.physical > 80 && Math.random() < 0.1) return 'foul';
     return 'loss';
 };
@@ -296,6 +302,7 @@ interface MatchStats {
 const simulateMatch = (home: Club, away: Club, strictness: number, isKnockout: boolean = false, weather: 'sunny' | 'rain' | 'snow' | 'cloudy' = 'sunny'): { homeGoals: number; awayGoals: number; events: MatchEvent[]; penalties?: boolean; playerStats: MatchStats[] } => {
     let homeGoals = 0;
     let awayGoals = 0;
+    let momentum = 0; // -10 to 10
     const events: MatchEvent[] = [];
     const playerStats: MatchStats[] = [...home.players, ...away.players].map(p => ({
         playerId: p.id, goals: 0, assists: 0, rating: 6.0 + (Math.random() * 1.0), yellow: false, red: false
@@ -303,11 +310,20 @@ const simulateMatch = (home: Club, away: Club, strictness: number, isKnockout: b
 
     const getStat = (pid: number) => playerStats.find(s => s.playerId === pid)!;
 
-    const homeControl = getZoneControl(home);
-    const awayControl = getZoneControl(away);
+    let homeControl = getZoneControl(home);
+    let awayControl = getZoneControl(away);
+
+    const homeMods = RoleService.getClubRoleModifiers(home);
+    const awayMods = RoleService.getClubRoleModifiers(away);
 
     // Apply Tactical Advantage
-    const tacAdv = getTacticalAdvantage(home.tactics, away.tactics);
+    let tacAdv = getTacticalAdvantage(home.tactics, away.tactics);
+    tacAdv += (homeMods.tacticalAdaptability || 0) * 10;
+    tacAdv -= (awayMods.tacticalAdaptability || 0) * 10;
+
+    // Width Effect: Trade control for chances
+    if (home.tactics) homeControl -= (home.tactics.instructions.attacking_width - 50) / 10;
+    if (away.tactics) awayControl -= (away.tactics.instructions.attacking_width - 50) / 10;
 
     // Weather Effects
     let passingMod = 1.0;
@@ -317,7 +333,7 @@ const simulateMatch = (home: Club, away: Club, strictness: number, isKnockout: b
     if (weather === 'sunny') { staminaDrainMod = 1.05; } // Heat
 
     const totalControl = (homeControl * passingMod) + (awayControl * passingMod) + tacAdv;
-    const homeDominance = ((homeControl * passingMod) + tacAdv / 2) / totalControl;
+    const homeDominanceBase = ((homeControl * passingMod) + tacAdv / 2) / totalControl;
 
     // TACTICAL MODIFIERS
     let homeChanceMod = 1.0;
@@ -325,22 +341,48 @@ const simulateMatch = (home: Club, away: Club, strictness: number, isKnockout: b
     let homeCardMod = 1.0;
     let awayCardMod = 1.0;
 
-    if (home.tactics) {
-        homeChanceMod += (home.tactics.instructions.passing_directness - 50) / 200; // More direct = slightly more chances but less control
-        homeCardMod += (home.tactics.instructions.pressing_intensity - 50) / 100; // High press = more cards
-    }
-    if (away.tactics) {
-        awayChanceMod += (away.tactics.instructions.passing_directness - 50) / 200;
-        awayCardMod += (away.tactics.instructions.pressing_intensity - 50) / 100;
-    }
+    // Role Effects
+    homeChanceMod += (homeMods.homeAtmosphere || 0);
+    homeChanceMod -= (awayMods.defensiveOrganization || 0) * 0.5;
+    awayChanceMod -= (homeMods.defensiveOrganization || 0) * 0.5;
+
+    const applyTactics = (t: Tactics | undefined, isHome: boolean) => {
+        if (!t) return;
+        const wMod = (t.instructions.attacking_width - 50) / 100;
+        const pMod = (t.instructions.pressing_intensity - 50) / 100;
+        const dMod = (t.instructions.passing_directness - 50) / 200;
+        const tMod = (t.instructions.tackling_style - 50) / 50;
+
+        if (isHome) {
+            homeChanceMod += wMod + dMod;
+            homeCardMod += pMod + tMod;
+        } else {
+            awayChanceMod += wMod + dMod;
+            awayCardMod += pMod + tMod;
+        }
+    };
+
+    applyTactics(home.tactics, true);
+    applyTactics(away.tactics, false);
 
     for (let minute = 1; minute <= 90; minute++) {
+        // Momentum Dynamics
+        if (momentum > 0.5) momentum -= 0.1;
+        else if (momentum < -0.5) momentum += 0.1;
+
+        const momEffect = momentum * 0.02; // Up to +/- 20% swing
+        const homeDominance = Math.min(0.95, Math.max(0.05, homeDominanceBase + momEffect));
+
         const isHomeAttack = Math.random() < homeDominance;
         const attackingTeam = isHomeAttack ? home : away;
         const defendingTeam = isHomeAttack ? away : home;
         const chanceMod = isHomeAttack ? homeChanceMod : awayChanceMod;
 
-        let actionProb = 0.04 * chanceMod;
+        // Creative Freedom: Chance for brilliance or turnover
+        const freedom = attackingTeam.tactics?.instructions.creative_freedom || 50;
+        const freedomBonus = Math.random() < (freedom / 500) ? 0.1 : 0;
+
+        let actionProb = (0.04 + freedomBonus) * chanceMod;
         if (minute > 80 && Math.abs(homeGoals - awayGoals) <= 1) actionProb = 0.08;
 
         if (Math.random() < actionProb) {
@@ -362,6 +404,10 @@ const simulateMatch = (home: Club, away: Club, strictness: number, isKnockout: b
             const duelResult = resolveDuel(attacker, defender);
 
             if (duelResult === 'win') {
+                // Momentum Swing
+                if (isHomeAttack) momentum = Math.min(10, momentum + 0.5);
+                else momentum = Math.max(-10, momentum - 0.5);
+
                 const shotQuality = (attacker.attributes.shooting + attacker.attributes.mental) / 2 * (1 - attackerFatigue * 0.3);
                 const gk = defendingTeam.players.find(p => p.position === 'GK') || defendingTeam.players[0];
                 const saveQuality = gk.attributes.goalkeeping + (Math.random() * 20);
@@ -372,7 +418,8 @@ const simulateMatch = (home: Club, away: Club, strictness: number, isKnockout: b
                 const xG = (0.7 * distance * angle) * (attacker.attributes.shooting / 100);
 
                 if (shotQuality + (Math.random() * 20) > saveQuality) {
-                    if (isHomeAttack) homeGoals++; else awayGoals++;
+                    if (isHomeAttack) { homeGoals++; momentum = 5; } // Goal Boost
+                    else { awayGoals++; momentum = -5; }
 
                     const sStats = getStat(attacker.id);
                     sStats.goals++;
@@ -411,7 +458,11 @@ const simulateMatch = (home: Club, away: Club, strictness: number, isKnockout: b
                 const dStats = getStat(defender.id);
                 const cardMod = isHomeAttack ? awayCardMod : homeCardMod;
 
-                if (cardRoll < (strictness / 4) * cardMod) {
+                // Aggression Effect
+                const aggression = defendingTeam.tactics?.instructions.tackling_style || 50;
+                const riskFactor = 1 + ((aggression - 50) / 50); // 0.5 to 2.0
+
+                if (cardRoll < (strictness / 4) * cardMod * riskFactor) {
                     events.push({ minute, type: 'card', text: `RED CARD! ${defender.name} is sent off!`, team: isHomeAttack ? 'away' : 'home' });
                     dStats.red = true;
                     dStats.rating -= 2.0;
@@ -453,6 +504,8 @@ const updatePlayersDaily = (club: Club, playedMatch: boolean, competition?: stri
 
     const tacticalBoost = assistant ? (assistant.attributes.coaching / 100) * 0.5 : 0.1;
     const healingBoost = physio ? (physio.attributes.healing / 100) * 0.2 : 0;
+
+    const clubMods = RoleService.getClubRoleModifiers(club);
 
     // Increase Tactical Familiarity if match played
     if (playedMatch && club.tactics) {
@@ -499,8 +552,29 @@ const updatePlayersDaily = (club: Club, playedMatch: boolean, competition?: stri
             p.condition = Math.max(10, p.condition - 30); // Major condition hit after match
             p.form = Math.min(100, Math.max(0, p.form + (Math.random() * 10 - 5)));
         } else {
-            p.fitness = Math.min(100, p.fitness + 8 + Math.random() * 3 + fitnessRecovery);
+            // Apply Stamina Decline reduction (from Workhorse/Squad Player)
+            const roleDef = p.roles ? p.roles.map(r => RoleService.getRoleDefinition(r).modifiers(p)) : [];
+            const staminaRecoveryBonus = roleDef.reduce((sum, m) => sum + (m.staminaDecline || 0), 0);
+
+            p.fitness = Math.min(100, p.fitness + 8 + Math.random() * 3 + fitnessRecovery + (staminaRecoveryBonus * 5));
             p.condition = Math.min(100, p.condition + 20 + fitnessRecovery); // Recover condition fast
+
+            // Training Growth (Dynamic Evolution - Performance Based)
+            const personalDevMod = roleDef.reduce((sum, m) => sum + (m.developmentSpeed || 0), 0);
+            const formFactor = Math.max(0.5, p.form / 60);
+            const ratingFactor = p.season_stats.appearances > 0 ? Math.max(0.8, p.season_stats.avg_rating / 6.5) : 1.0;
+
+            const growthChance = 0.02 * (1 + (clubMods.teamTrainingEfficiency || 0) + personalDevMod) * formFactor * ratingFactor;
+
+            if (p.overall < p.potential && Math.random() < growthChance) {
+                const keys = Object.keys(p.attributes) as (keyof typeof p.attributes)[];
+                const key = keys[Math.floor(Math.random() * keys.length)];
+                if (p.attributes[key] < 99) {
+                    p.attributes[key]++;
+                    // Small chance to bump overall
+                    if (Math.random() < 0.1) p.overall++;
+                }
+            }
         }
 
         if (p.injury_status.type !== "none") {
@@ -510,8 +584,11 @@ const updatePlayersDaily = (club: Club, playedMatch: boolean, competition?: stri
                 p.injury_status.weeks_remaining = 0;
             }
         } else {
+            const roleDef = p.roles ? p.roles.map(r => RoleService.getRoleDefinition(r).modifiers(p)) : [];
+            const injuryResist = roleDef.reduce((sum, m) => sum + (m.injuryResistance || 0), 0);
+
             const redZoneMult = p.fitness < 75 ? 4 : 1;
-            if (Math.random() < 0.0005 * p.injury_status.proneness * redZoneMult * (1 - injuryReduction)) {
+            if (Math.random() < 0.0005 * p.injury_status.proneness * redZoneMult * (1 - injuryReduction) * (1 - injuryResist)) {
                 p.injury_status.type = "hamstring";
                 p.injury_status.weeks_remaining = 2 + Math.floor(Math.random() * 4);
             }
@@ -734,37 +811,76 @@ const processNegotiations = (state: GameState): Negotiation[] => {
 const generateAiTransferActivity = (state: GameState): { news: NewsItem[], transfers: any[] } => {
     const news: NewsItem[] = [];
     const transfers = [];
-    if (Math.random() > 0.05) return { news, transfers };
+    if (Math.random() > 0.15) return { news, transfers }; // Throttle
 
     const allClubs = Object.values(state.leagues).flatMap(l => l.clubs);
-    const buyer = allClubs[Math.floor(Math.random() * allClubs.length)];
-    const targetOverall = buyer.reputation > 80 ? 85 : 75;
-    const seller = allClubs.find(c => c.id !== buyer.id && c.leagueId === buyer.leagueId && c.players.some(p => p.overall >= targetOverall && p.transfer_status !== 'not_for_sale'));
+    const activeClub = allClubs[Math.floor(Math.random() * allClubs.length)];
 
-    if (seller) {
-        const player = seller.players.find(p => p.overall >= targetOverall);
-        if (player && buyer.budget > player.market_value) {
-            // Rep Check AI
-            if (player.reputation > buyer.reputation + 15) return { news, transfers };
+    // 1. Financial Distress Sale (Smart AI)
+    if (activeClub.budget < -5000000 && activeClub.willingness_to_sell > 30) {
+        const valuable = [...activeClub.players].sort((a, b) => b.market_value - a.market_value)[0];
+        if (valuable && valuable.transfer_status !== 'listed') {
+            const buyer = allClubs.find(c => c.id !== activeClub.id && c.budget > valuable.market_value * 1.1 && c.reputation >= activeClub.reputation);
+            if (buyer) {
+                activeClub.players = activeClub.players.filter(p => p.id !== valuable.id);
+                valuable.clubId = buyer.id;
+                valuable.salary = Math.floor(valuable.salary * 1.2);
+                buyer.players.push(valuable);
 
-            buyer.budget -= player.market_value;
-            buyer.season_financials.transfer_spend += player.market_value;
+                activeClub.budget += valuable.market_value;
+                buyer.budget -= valuable.market_value;
 
-            seller.budget += player.market_value;
-            seller.season_financials.transfer_income += player.market_value;
+                activeClub.season_financials.transfer_income += valuable.market_value;
+                buyer.season_financials.transfer_spend += valuable.market_value;
 
-            seller.players = seller.players.filter(p => p.id !== player.id);
-            player.clubId = buyer.id;
-            buyer.players.push(player);
+                news.push({
+                    id: Date.now(),
+                    date: state.currentDate,
+                    headline: `FIRE SALE: ${activeClub.name} sell ${valuable.name}`,
+                    content: `${buyer.name} capitalize on ${activeClub.name}'s debts to sign ${valuable.name} for £${(valuable.market_value / 1000000).toFixed(1)}M.`,
+                    image_type: 'transfer',
+                    clubId: activeClub.id
+                });
+                return { news, transfers };
+            }
+        }
+    }
 
-            news.push({
-                id: Date.now(),
-                date: state.currentDate,
-                headline: `DONE DEAL: ${player.name} joins ${buyer.name}`,
-                content: `${buyer.name} have completed the signing of ${player.name} from ${seller.name} for £${(player.market_value / 1000000).toFixed(1)}M.`,
-                image_type: 'transfer',
-                clubId: buyer.id
-            });
+    // 2. Strategic Buy (Needs Analysis)
+    const needs = FinancialEngine.evaluateSquadNeeds(activeClub);
+    if (needs && activeClub.budget > 5000000) {
+        const target = allClubs.flatMap(c => c.players).find(p =>
+            p.clubId !== activeClub.id &&
+            (p.position === needs.position || (needs.position === 'FWD' && p.position === 'ST')) &&
+            p.transfer_status !== 'not_for_sale' &&
+            p.market_value < activeClub.budget * 0.9 &&
+            p.overall > (activeClub.reputation / 2 + 35) && // Must be good enough
+            p.age < 32
+        );
+
+        if (target) {
+            const seller = allClubs.find(c => c.id === target.clubId);
+            if (seller) {
+                seller.players = seller.players.filter(p => p.id !== target.id);
+                target.clubId = activeClub.id;
+                target.salary = Math.floor(target.salary * 1.15);
+                activeClub.players.push(target);
+
+                activeClub.budget -= target.market_value;
+                seller.budget += target.market_value;
+
+                activeClub.season_financials.transfer_spend += target.market_value;
+                seller.season_financials.transfer_income += target.market_value;
+
+                news.push({
+                    id: Date.now(),
+                    date: state.currentDate,
+                    headline: `OFFICIAL: ${activeClub.name} sign ${target.name}`,
+                    content: `Addressing a key weakness in ${needs.position === 'GK' ? 'goal' : 'the squad'}, they signed ${target.name} from ${seller.name}.`,
+                    image_type: 'transfer',
+                    clubId: activeClub.id
+                });
+            }
         }
     }
     return { news, transfers };
@@ -966,6 +1082,7 @@ export const transitionSeason = (state: GameState): GameState => {
         league.clubs.forEach(c => {
             c.players.forEach(p => {
                 p.age += 1;
+                p.years_at_club = (p.years_at_club || 0) + 1;
                 if (p.age < 24 && p.potential > p.overall) p.overall = Math.min(p.potential, p.overall + Math.floor(Math.random() * 3) + 1);
                 else if (p.age > 31) p.overall = Math.max(40, p.overall - 2);
             });
@@ -1145,15 +1262,18 @@ export const processDay = (state: GameState): { newState: GameState, events: str
                     if (homeClub.infrastructure) {
                         const attendancePct = Math.min(1, (homeClub.reputation / 100) + (Math.random() * 0.2));
 
-                        // DYNAMIC WORLD: Attendance influenced by happiness and ticket price
+                        // DYNAMIC WORLD: Attendance influenced by happiness and ticket price strategy
                         const happinessFactor = homeClub.fan_happiness / 100;
-                        const priceSensitivity = 1 + Math.max(0, (homeClub.infrastructure.stadium.ticket_price - 45) / 100); // Standard price 45
-                        const dynamicAttendance = Math.floor(homeClub.infrastructure.stadium.capacity * attendancePct * happinessFactor / priceSensitivity);
+                        const priceMod = FinancialEngine.getAttendanceMod(homeClub);
+                        const ticketPrice = FinancialEngine.getTicketPrice(homeClub);
 
-                        const gateReceipts = dynamicAttendance * homeClub.infrastructure.stadium.ticket_price;
+                        const dynamicAttendance = Math.floor(homeClub.infrastructure.stadium.capacity * attendancePct * happinessFactor * priceMod);
+                        const finalAttendance = Math.min(homeClub.infrastructure.stadium.capacity, dynamicAttendance);
+
+                        const gateReceipts = finalAttendance * ticketPrice;
                         homeClub.budget += gateReceipts;
                         homeClub.season_financials.matchday_income += gateReceipts;
-                        homeClub.attendance_rate = dynamicAttendance / homeClub.infrastructure.stadium.capacity;
+                        homeClub.attendance_rate = finalAttendance / homeClub.infrastructure.stadium.capacity;
                     }
 
                     updatePlayersDaily(homeClub, true, fixture.competition, result.playerStats);
@@ -1248,10 +1368,31 @@ export const processDay = (state: GameState): { newState: GameState, events: str
                 updatePlayersDaily(c, false, null);
             }
 
-            // Daily Wages
-            const dailyWages = c.wage_budget_weekly / 7;
-            c.budget -= dailyWages;
-            c.season_financials.wage_bill += dailyWages;
+            // Check Role Progression (Weekly on Mondays)
+            if (new Date(state.currentDate).getDay() === 1) {
+                c.players.forEach(p => {
+                    const { added } = RoleService.updatePlayerRoles(p, c);
+                    if (added.length > 0 && c.id === state.playerClubId) {
+                         added.forEach(role => {
+                             const def = RoleService.getRoleDefinition(role);
+                             if (def.tier >= 2) {
+                                 newNews.push({
+                                     id: Date.now() + Math.random(),
+                                     date: state.currentDate,
+                                     headline: `${p.name.toUpperCase()} DEVELOPS AS ${role.toUpperCase()}`,
+                                     content: `${p.name} has been recognized as a ${role} due to their recent performances and status within the club.`,
+                                     image_type: 'general',
+                                     clubId: c.id
+                                 });
+                             }
+                         });
+                    }
+                });
+            }
+
+            const roleMods = RoleService.getClubRoleModifiers(c);
+
+            FinancialEngine.processDailyFinances(c, roleMods, playedTodayLocal);
         });
 
         const takeover = generateTakeover(league.clubs);

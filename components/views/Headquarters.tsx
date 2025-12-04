@@ -43,6 +43,12 @@ export const Headquarters: React.FC = () => {
         dispatch({ type: 'UPDATE_STATE', payload: { ...state } });
     };
 
+    const updateStrategy = (key: string, value: any) => {
+        if (!playerClub.financial_strategy) return;
+        playerClub.financial_strategy = { ...playerClub.financial_strategy, [key]: value };
+        dispatch({ type: 'UPDATE_STATE', payload: { ...state } });
+    };
+
     // --- COMPONENTS ---
 
     const FacilityCard = ({ id, data, icon }: { id: 'youth_academy' | 'training_ground' | 'medical_center', data: any, icon: React.ReactNode }) => (
@@ -196,6 +202,53 @@ export const Headquarters: React.FC = () => {
                 {/* FINANCE TAB */}
                 {activeTab === 'finance' && (
                     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
+
+                        {/* Strategy Controls */}
+                        <div className="bg-neutral-900 rounded-xl border border-white/10 p-6 shadow-lg">
+                            <h3 className="text-white font-bold uppercase tracking-widest text-sm mb-6 flex items-center gap-2">
+                                Financial Strategy
+                            </h3>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                <div>
+                                    <label className="block text-xs font-bold text-neutral-500 uppercase mb-2">Ticket Pricing Policy</label>
+                                    <select
+                                        value={playerClub.financial_strategy?.ticket_pricing || 'normal'}
+                                        onChange={(e) => updateStrategy('ticket_pricing', e.target.value)}
+                                        className="w-full bg-neutral-950 text-white text-sm p-3 rounded border border-neutral-800 focus:border-emerald-500 outline-none"
+                                    >
+                                        <option value="very_low">Very Low (Max Attendance)</option>
+                                        <option value="low">Low</option>
+                                        <option value="normal">Normal</option>
+                                        <option value="high">High</option>
+                                        <option value="very_high">Very High (Max Revenue)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-neutral-500 uppercase mb-2">Merchandise Focus</label>
+                                    <select
+                                        value={playerClub.financial_strategy?.merchandise_focus || 'local'}
+                                        onChange={(e) => updateStrategy('merchandise_focus', e.target.value)}
+                                        className="w-full bg-neutral-950 text-white text-sm p-3 rounded border border-neutral-800 focus:border-emerald-500 outline-none"
+                                    >
+                                        <option value="local">Local (Low Cost)</option>
+                                        <option value="national">National (Medium Cost)</option>
+                                        <option value="global">Global (High Cost/High Reward)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-neutral-500 uppercase mb-2">Debt Repayment</label>
+                                    <select
+                                        value={playerClub.financial_strategy?.debt_repayment || 'balanced'}
+                                        onChange={(e) => updateStrategy('debt_repayment', e.target.value)}
+                                        className="w-full bg-neutral-950 text-white text-sm p-3 rounded border border-neutral-800 focus:border-emerald-500 outline-none"
+                                    >
+                                        <option value="minimum">Minimum</option>
+                                        <option value="balanced">Balanced</option>
+                                        <option value="aggressive">Aggressive</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
 
                         {/* Top Summary Cards */}
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">

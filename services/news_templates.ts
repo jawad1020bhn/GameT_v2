@@ -9,7 +9,9 @@ export const NEWS_SOURCES = [
   { name: "Tactical View", tier: "Analysis" },
   { name: "Fan TV", tier: "Opinion" },
   { name: "The Pundit", tier: "Opinion" },
-  { name: "Financial Times", tier: "Business" }
+  { name: "Financial Times", tier: "Business" },
+  { name: "Medical Gazette", tier: "Tier 2" },
+  { name: "Youth Watch", tier: "Tier 3" }
 ];
 
 export const HEADLINES = {
@@ -78,6 +80,42 @@ export const HEADLINES = {
         "Training ground bust-up involving {player}",
         "{player} agent demands meeting with board",
         "Crisis talks planned to resolve {player} future"
+    ],
+    INJURY_BLOW: [
+        "Injury Crisis: {club} lose {player} for months",
+        "Season over? {player} stretchered off in training",
+        "Medical Staff concerned as {player} limps out",
+        "{club} blow as star man {player} sidelined"
+    ],
+    YOUTH_HYPE: [
+        "Remember the name: {player} shines for U21s",
+        "Academy Jewel: {club} unearth another gem",
+        "Scouts flock to watch {player} debut",
+        "The new Messi? {player} turns heads at {club}"
+    ],
+    FINANCIAL_NEWS: [
+        "Takeover Rumours: Billionaire eyes {club}",
+        "Financial Boost: {club} announce record sponsorship",
+        "Debt Concerns: {club} must sell to survive",
+        "War Chest: {manager} promised funds for January"
+    ],
+    MANAGER_TALK: [
+        "Mind Games: {manager} piles pressure on rivals",
+        "Tactical Revolution: How {manager} changed {club}",
+        "Vote of Confidence: Board backs {manager} despite form",
+        "{manager} slams schedule: 'Players are exhausted'"
+    ],
+    WINNING_STREAK: [
+        "Unstoppable: {club} make it 5 wins in a row",
+        "Title Charge: {club} momentum builds",
+        "Perfect Month: {club} dominate the league",
+        "Can anyone stop {club}?"
+    ],
+    LOSING_STREAK: [
+        "Freefall: {club} lose again",
+        "Relegation form: {club} in desperate trouble",
+        "Crisis Meeting: Players called in on day off",
+        "Fans turn on {manager} after another defeat"
     ]
 };
 
@@ -146,5 +184,25 @@ export const CONTENT = {
         "Fans have gathered at the training ground to welcome the new signing.",
         "The manager stated that {player} was their number one target all summer.",
         "It is believed wages will be around £{wage}k per week."
+    ],
+    INJURY_DETAIL: [
+        "Scans have confirmed the worst fears. {player} is expected to miss a significant portion of the season.",
+        "The manager refused to put a timeline on the recovery, simply stating it 'doesn't look good'.",
+        "This leaves the squad threadbare in a key position ahead of the busy winter schedule."
+    ],
+    YOUTH_DETAIL: [
+        "His touch and vision were a level above everyone else on the pitch. A star is born.",
+        "Sources say the club are rushing to tie {player} down to a long-term professional contract.",
+        "It's rare to see such maturity from a teenager. He looks ready for the first team."
+    ],
+    STREAK_DETAIL: [
+        "Confidence is flowing through the veins of the squad. They look unbeatable right now.",
+        "The dressing room is buzzing. The belief is growing that this could be a special season.",
+        "Every bounce of the ball seems to go their way, but you make your own luck in this game."
+    ],
+    CRISIS_DETAIL: [
+        "Heads dropped after the first goal went in. The fragility of this team is alarming.",
+        "There seems to be a complete lack of leadership on the pitch. Who will stand up?",
+        "The manager looked a lonely figure on the touchline. Time is running out."
     ]
 };
