@@ -2,6 +2,7 @@ import React, { createContext, useContext, useReducer, ReactNode, useState, useE
 import { GameState, League, Club, GameMessage, View, NewsItem, Negotiation, TransferOffer, Tactics, ManagerProfile } from '../types';
 import { INITIAL_LEAGUES_DATA, INITIAL_DATE, START_YEAR } from '../constants';
 import { REAL_WORLD_LEAGUES } from '../services/real_world_data';
+import { DataIntegrityService } from '../services/DataIntegrityService';
 import { processDay, addDays, calculatePlayerValue, transitionSeason } from '../services/engine';
 
 type Action =
@@ -59,7 +60,8 @@ const initialState: GameState = {
     leagues: (() => {
         // Transform array to object map
         const leagueMap: { [key: string]: League } = {};
-        REAL_WORLD_LEAGUES.forEach(l => {
+        const processedLeagues = DataIntegrityService.processLeagues(REAL_WORLD_LEAGUES);
+        processedLeagues.forEach(l => {
             leagueMap[l.name] = l;
         });
         return leagueMap;
@@ -291,25 +293,24 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 isActive: true,
                 type: days === 1 ? 'day' : 'week',
                 progress: 0,
-                statusText: 'Initializing Engine...',
+                statusText: 'Processing...',
                 recentEvents: []
             }
         });
 
         let currentState = state;
-        const delay = days === 1 ? 1000 : 800;
 
         for (let i = 0; i < days; i++) {
+            // Backend Optimization: Yield to event loop to allow UI repaint, but no artificial delay
+            await new Promise(resolve => setTimeout(resolve, 0));
+
             dispatch({
                 type: 'SET_SIMULATION',
                 payload: {
                     progress: (i / days) * 100,
-                    statusText: `Simulating ${currentState.currentDate}: Matches...`
+                    statusText: `Simulating ${currentState.currentDate}`
                 }
             });
-
-            // Visual weight: Delay for match sim
-            await new Promise(resolve => setTimeout(resolve, delay * 0.3));
 
             // Process Shouts via Ref
             const latestGlobalState = stateRef.current;
@@ -327,16 +328,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 });
             }
 
-            // Run Logic
+            // Run Logic (Optimized: No throttling)
             const result = processDay(currentState);
             currentState = result.newState;
-
-            // Visual weight: Transfer Market & Growth
-            dispatch({ payload: { statusText: `Simulating ${currentState.currentDate}: Transfer Market...` } });
-            await new Promise(resolve => setTimeout(resolve, delay * 0.3));
-
-            dispatch({ payload: { statusText: `Simulating ${currentState.currentDate}: Player Growth...` } });
-            await new Promise(resolve => setTimeout(resolve, delay * 0.4));
 
             dispatch({
                 type: 'SET_SIMULATION',
@@ -353,12 +347,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             }
         }
 
-        dispatch({
-            type: 'SET_SIMULATION',
-            payload: { progress: 100, statusText: 'Finalizing Data...' }
-        });
-        await new Promise(resolve => setTimeout(resolve, 500));
-
+        // Finalize immediately
         dispatch({ type: 'UPDATE_STATE', payload: currentState });
         dispatch({ type: 'SET_SIMULATION', payload: { isActive: false } });
     };
