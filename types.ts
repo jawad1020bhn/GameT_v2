@@ -12,6 +12,34 @@ export enum View {
   SETTINGS = 'settings'
 }
 
+export enum PlayerRole {
+  // Tier 1: Foundation
+  ACADEMY_GRADUATE = 'Academy Graduate',
+  EMERGING_TALENT = 'Emerging Talent',
+  SQUAD_PLAYER = 'Squad Player',
+  WORKHORSE = 'Workhorse',
+
+  // Tier 2: Established
+  CONSISTENT_PERFORMER = 'Consistent Performer',
+  MENTOR = 'Mentor',
+  FAN_FAVORITE = 'Fan Favorite',
+  CLUTCH_PLAYER = 'Clutch Player',
+  TACTICAL_ANCHOR = 'Tactical Anchor',
+
+  // Tier 3: Elite
+  TEAM_LEADER = 'Team Leader',
+  FRANCHISE_PLAYER = 'Franchise Player',
+  CLUB_ICON = 'Club Icon',
+  LEGACY_LEGEND = 'Legacy Legend',
+
+  // Specialized
+  WILDCARD = 'Wildcard',
+  ENFORCER = 'Enforcer',
+  CAPTAIN_MATERIAL = 'Captain Material',
+  SUPER_SUB = 'Super Sub',
+  VETERAN_PRESENCE = 'Veteran Presence'
+}
+
 export interface PlayerAttributes {
   pace: number;
   shooting: number;
@@ -80,6 +108,8 @@ export interface Player {
   clubId: number;
   season_stats: PlayerStats;
   competition_stats: { [key: string]: PlayerStats };
+  roles: PlayerRole[];
+  years_at_club: number;
 }
 
 export interface ClubFacilities {
@@ -186,6 +216,9 @@ export interface Tactics {
     passing_directness: number;
     pressing_intensity: number;
     tempo: number;
+    attacking_width: number;
+    creative_freedom: number;
+    tackling_style: number;
   };
   lineup: number[];
   familiarity: number;
