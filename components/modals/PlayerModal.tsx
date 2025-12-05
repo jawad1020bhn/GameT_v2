@@ -1,5 +1,6 @@
 
 import React from 'react';
+import { useGame } from '../../context/GameContext';
 import { Player } from '../../types';
 
 interface PlayerModalProps {
@@ -7,7 +8,21 @@ interface PlayerModalProps {
   onClose: () => void;
 }
 
-const AttributeBar = ({ label, value, max = 99 }: { label: string; value: number; max?: number }) => {
+const AttributeBar = ({ label, value, max = 99, hidden = false }: { label: string; value: number; max?: number; hidden?: boolean }) => {
+  if (hidden) {
+    return (
+        <div className="mb-2 opacity-50">
+            <div className="flex justify-between items-end mb-0.5">
+                <span className="text-[10px] uppercase font-bold text-neutral-400 tracking-wider">{label}</span>
+                <span className="text-xs font-mono font-bold text-neutral-500">??</span>
+            </div>
+            <div className="h-1.5 w-full bg-neutral-800/80 rounded-sm overflow-hidden border border-neutral-700/50">
+                <div className="h-full bg-neutral-800 w-full animate-pulse"></div>
+            </div>
+        </div>
+    );
+  }
+
   let color = 'bg-neutral-500';
   if (value >= 90) color = 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]';
   else if (value >= 80) color = 'bg-emerald-600';
@@ -39,6 +54,20 @@ const StatBox = ({ label, value, sub = "", highlight = false }: { label: string;
 );
 
 export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose }) => {
+  const { playerClub } = useGame();
+
+  // FOG OF WAR LOGIC
+  const isVisible = () => {
+      if (!playerClub) return true;
+      if (player.clubId === playerClub.id) return true; // Own player
+      if (playerClub.scouting.assignments.some(a => a.reports.includes(player.id))) return true; // Scouted
+      if (player.reputation >= 85) return true; // World famous
+      if (player.transfer_status === 'listed') return true; // Publicly listed (simplified)
+      return false;
+  };
+
+  const visible = isVisible();
+
   // Prevent scrolling when modal is open
   React.useEffect(() => {
     document.body.style.overflow = 'hidden';
@@ -87,13 +116,13 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose }) => 
               <div className="text-center">
                   <div className="text-xs text-neutral-500 font-bold uppercase">Overall</div>
                   <div className="text-4xl font-bold text-white font-oswald bg-neutral-800 px-3 py-1 rounded border border-neutral-700 shadow-inner">
-                    {player.overall}
+                    {visible ? player.overall : '?'}
                   </div>
               </div>
               <div className="text-center">
                   <div className="text-xs text-neutral-500 font-bold uppercase">Potential</div>
                   <div className="text-4xl font-bold text-emerald-400 font-oswald bg-neutral-800 px-3 py-1 rounded border border-neutral-700 shadow-inner">
-                    {player.potential}
+                    {visible ? player.potential : '?'}
                   </div>
               </div>
               <button 
@@ -111,21 +140,23 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose }) => 
                 
                 {/* Left Column: Attributes */}
                 <div className="lg:col-span-1 space-y-6">
-                    <div className="bg-neutral-950/50 p-5 rounded-lg border border-neutral-800">
+                    <div className="bg-neutral-950/50 p-5 rounded-lg border border-neutral-800 relative overflow-hidden">
+                        {!visible && <div className="absolute inset-0 z-10 flex items-center justify-center bg-neutral-950/80 backdrop-blur-sm"><span className="text-white font-bold font-oswald uppercase tracking-widest border border-white/20 px-4 py-2 rounded">Scouting Required</span></div>}
                         <h3 className="text-emerald-500 font-bold uppercase text-sm tracking-widest mb-4 border-b border-neutral-800 pb-2">Technical</h3>
-                        <AttributeBar label="Shooting" value={player.attributes.shooting} />
-                        <AttributeBar label="Passing" value={player.attributes.passing} />
-                        <AttributeBar label="Dribbling" value={player.attributes.dribbling} />
-                        <AttributeBar label="Set Pieces" value={player.attributes.set_pieces} />
-                        <AttributeBar label="Goalkeeping" value={player.attributes.goalkeeping} max={20} />
+                        <AttributeBar label="Shooting" value={player.attributes.shooting} hidden={!visible} />
+                        <AttributeBar label="Passing" value={player.attributes.passing} hidden={!visible} />
+                        <AttributeBar label="Dribbling" value={player.attributes.dribbling} hidden={!visible} />
+                        <AttributeBar label="Set Pieces" value={player.attributes.set_pieces} hidden={!visible} />
+                        <AttributeBar label="Goalkeeping" value={player.attributes.goalkeeping} max={20} hidden={!visible} />
                     </div>
 
-                    <div className="bg-neutral-950/50 p-5 rounded-lg border border-neutral-800">
+                    <div className="bg-neutral-950/50 p-5 rounded-lg border border-neutral-800 relative overflow-hidden">
+                        {!visible && <div className="absolute inset-0 z-10 flex items-center justify-center bg-neutral-950/80 backdrop-blur-sm"></div>}
                         <h3 className="text-emerald-500 font-bold uppercase text-sm tracking-widest mb-4 border-b border-neutral-800 pb-2">Physical & Mental</h3>
-                        <AttributeBar label="Pace" value={player.attributes.pace} />
-                        <AttributeBar label="Physical" value={player.attributes.physical} />
-                        <AttributeBar label="Mental" value={player.attributes.mental} />
-                        <AttributeBar label="Defending" value={player.attributes.defending} />
+                        <AttributeBar label="Pace" value={player.attributes.pace} hidden={!visible} />
+                        <AttributeBar label="Physical" value={player.attributes.physical} hidden={!visible} />
+                        <AttributeBar label="Mental" value={player.attributes.mental} hidden={!visible} />
+                        <AttributeBar label="Defending" value={player.attributes.defending} hidden={!visible} />
                     </div>
                 </div>
 
@@ -183,6 +214,21 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose }) => 
 
                 {/* Right Column: Contract & Info */}
                 <div className="lg:col-span-1 space-y-6">
+                    <div className="bg-neutral-950/50 p-5 rounded-lg border border-neutral-800">
+                        <h3 className="text-purple-500 font-bold uppercase text-sm tracking-widest mb-4 border-b border-neutral-800 pb-2">Dynamic Roles</h3>
+                        <div className="flex flex-wrap gap-2">
+                            {player.roles && player.roles.length > 0 ? (
+                                player.roles.map(role => (
+                                    <span key={role} className="px-2 py-1 bg-purple-900/30 border border-purple-500/30 text-purple-200 text-[10px] uppercase font-bold rounded tracking-wider shadow-sm">
+                                        {role}
+                                    </span>
+                                ))
+                            ) : (
+                                <span className="text-xs text-neutral-600 italic">No specialized roles yet.</span>
+                            )}
+                        </div>
+                    </div>
+
                     <div className="bg-neutral-950/50 p-5 rounded-lg border border-neutral-800">
                         <h3 className="text-yellow-500 font-bold uppercase text-sm tracking-widest mb-4 border-b border-neutral-800 pb-2">Contract & Value</h3>
                         <div className="grid grid-cols-1 gap-3">
