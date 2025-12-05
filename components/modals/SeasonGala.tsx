@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { useGame } from '../../context/GameContext';
 import { GalaData } from '../../types';
 
@@ -9,6 +9,7 @@ interface SeasonGalaProps {
 
 export const SeasonGala: React.FC<SeasonGalaProps> = ({ data }) => {
     const { dispatch, playerClub } = useGame();
+    const [step, setStep] = useState<1 | 2>(1);
 
     const handleContinue = () => {
         dispatch({ type: 'START_NEW_SEASON' });
@@ -16,97 +17,192 @@ export const SeasonGala: React.FC<SeasonGalaProps> = ({ data }) => {
 
     if (!playerClub) return null;
 
+    // Helper for formatting large numbers
+    const fmtMoney = (n: number) => `£${(n / 1000000).toFixed(1)}M`;
+    const fmtWage = (n: number) => `£${(n / 1000).toFixed(0)}K`;
+
     return (
-        <div className="fixed inset-0 z-[200] bg-neutral-950 flex flex-col items-center justify-center overflow-hidden animate-in fade-in duration-1000">
+        <div className="fixed inset-0 z-[200] bg-neutral-950 flex flex-col items-center justify-center overflow-hidden animate-in fade-in duration-500 font-sans">
              {/* Background FX */}
-             <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20 animate-pulse"></div>
-             <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-transparent to-neutral-950"></div>
+             <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-20"></div>
+             <div className="absolute inset-0 bg-gradient-to-br from-neutral-950 via-neutral-900 to-blue-900/10 pointer-events-none"></div>
              
-             <div className="relative z-10 w-full max-w-6xl h-[90vh] flex flex-col">
+             {/* Main Container */}
+             <div className="relative z-10 w-full max-w-4xl bg-neutral-900 border border-white/10 rounded-xl shadow-2xl overflow-hidden flex flex-col h-[85vh]">
                  
-                 {/* Title */}
-                 <div className="text-center mb-8 animate-in slide-in-from-top-10 duration-1000 delay-300">
-                     <div className="text-yellow-500 font-bold uppercase tracking-[0.5em] text-sm mb-2">End of Season Awards</div>
-                     <h1 className="text-6xl md:text-8xl font-black text-white font-oswald uppercase tracking-tighter drop-shadow-2xl">
-                         Season <span className="text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-yellow-600">{data.season}</span>
-                     </h1>
-                 </div>
-
-                 <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-6 p-6 overflow-y-auto custom-scrollbar">
-                     
-                     {/* LEAGUE CHAMPION CARD */}
-                     <div className="md:col-span-4 bg-gradient-to-br from-neutral-900 to-neutral-800 border border-yellow-500/30 rounded-xl p-8 flex flex-col items-center justify-center text-center shadow-[0_0_50px_rgba(234,179,8,0.1)] relative overflow-hidden group animate-in zoom-in duration-700 delay-500">
-                         <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
-                         <div className="text-yellow-500 text-6xl mb-4 drop-shadow-lg">🏆</div>
-                         <div className="text-xs text-neutral-400 font-bold uppercase tracking-widest mb-2">{data.leagueName} Champion</div>
-                         <div className="text-3xl md:text-4xl font-black text-white uppercase font-oswald mb-4">{data.championId === playerClub.id ? playerClub.name : "The Winner"}</div> 
-                         {/* Note: Actual name is not passed in data.championId, we need to fetch it or pass it. The generateGala logic only passed ID. 
-                             Let's rely on the awards data or fetch it from context if possible, but context is complex here. 
-                             Actually, I updated generateGala to include championId, but UI needs name. 
-                             For now, let's just show 'League Winner' if not player. Or assume logic holds.
-                             Actually, let's fix the display logic:
-                         */}
-                         <div className="text-sm text-neutral-500">
-                             {data.championId === playerClub.id ? "Congratulations on the title!" : `Better luck next year.`}
+                 {/* PAGE 1: SEASON RESULTS */}
+                 {step === 1 && (
+                     <div className="flex-1 flex flex-col p-8 animate-in slide-in-from-right duration-500">
+                         {/* Header */}
+                         <div className="text-center mb-8 border-b border-white/10 pb-6">
+                             <div className="flex items-center justify-center gap-4 text-emerald-500 font-bold uppercase tracking-widest text-xs mb-2">
+                                 <span>Season {data.season}</span>
+                                 <span className="w-1 h-1 bg-emerald-500 rounded-full"></span>
+                                 <span>Complete</span>
+                             </div>
+                             <h1 className="text-5xl font-black text-white font-oswald uppercase tracking-tight mb-2">
+                                 {playerClub.name}
+                             </h1>
+                             <p className="text-neutral-400 italic font-serif">"A season to remember"</p>
                          </div>
-                     </div>
 
-                     {/* PLAYER PERFORMANCE */}
-                     <div className="md:col-span-4 bg-neutral-900 border border-white/10 rounded-xl p-8 flex flex-col items-center justify-center text-center animate-in zoom-in duration-700 delay-700">
-                         <div className="text-4xl mb-4">📊</div>
-                         <div className="text-xs text-neutral-400 font-bold uppercase tracking-widest mb-2">Season Finish</div>
-                         <div className="text-6xl font-black text-white font-oswald mb-2">{data.playerPos}<span className="text-2xl align-top">th</span></div>
-                         <div className="text-sm text-neutral-500">
-                             {data.playerPos <= 4 ? "Champions League Football Secured" : "A season of rebuilding."}
+                         {/* Objectives */}
+                         <div className="mb-8">
+                             <h3 className="text-xs font-bold text-neutral-500 uppercase tracking-widest mb-4">Objectives Review</h3>
+                             <div className="space-y-3">
+                                 {data.review?.objectives && Object.entries(data.review.objectives).map(([key, obj]) => (
+                                     <div key={key} className="flex items-center justify-between bg-neutral-950 p-4 rounded border border-white/5">
+                                         <div className="capitalize font-bold text-white w-32">{key}</div>
+                                         <div className="text-sm text-neutral-400">Target: <span className="text-white">{obj.target}</span></div>
+                                         <div className="flex items-center gap-2">
+                                             <span className={`text-sm font-bold ${obj.success ? 'text-emerald-400' : 'text-red-400'}`}>
+                                                 {obj.result}
+                                             </span>
+                                             <span>{obj.success ? '✓' : '✗'}</span>
+                                         </div>
+                                     </div>
+                                 ))}
+                             </div>
                          </div>
-                     </div>
 
-                     {/* TIMELINE */}
-                     <div className="md:col-span-4 bg-neutral-900 border border-white/10 rounded-xl p-6 overflow-hidden flex flex-col animate-in zoom-in duration-700 delay-900">
-                         <div className="text-xs text-neutral-400 font-bold uppercase tracking-widest mb-4 border-b border-white/5 pb-2">Season Highlights</div>
-                         <div className="flex-1 overflow-y-auto space-y-4 custom-scrollbar">
-                             {data.history.map((h, i) => (
-                                 <div key={i} className="flex gap-3">
-                                     <div className="w-12 text-[10px] text-neutral-500 font-mono shrink-0 pt-1">{new Date(h.date).toLocaleDateString(undefined, {month:'short', day:'numeric'})}</div>
-                                     <div className="text-xs text-white">{h.event}</div>
+                         {/* Board Verdict */}
+                         <div className="mb-8">
+                             <h3 className="text-xs font-bold text-neutral-500 uppercase tracking-widest mb-4">Board Verdict</h3>
+                             <div className="bg-neutral-950 p-6 rounded border border-white/5">
+                                 <div className="flex justify-between items-end mb-2">
+                                     <span className="text-white font-bold text-lg">Rating</span>
+                                     <span className="text-2xl font-black text-white">{data.review?.board_score}<span className="text-neutral-500 text-sm">/100</span></span>
+                                 </div>
+                                 <div className="w-full bg-neutral-800 h-2 rounded-full overflow-hidden mb-4">
+                                     <div
+                                        className={`h-full ${data.review?.board_score && data.review.board_score > 70 ? 'bg-emerald-500' : data.review?.board_score && data.review.board_score > 40 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                                        style={{ width: `${data.review?.board_score}%` }}
+                                     ></div>
+                                 </div>
+                                 <p className="text-neutral-300 italic text-sm">"{data.review?.board_verdict}"</p>
+                             </div>
+                         </div>
+
+                         {/* Quick Stats */}
+                         <div className="grid grid-cols-4 gap-4 mt-auto">
+                             {[
+                                 { label: "Played", value: data.review?.stats.played },
+                                 { label: "Wins", value: data.review?.stats.wins },
+                                 { label: "Losses", value: data.review?.stats.losses },
+                                 { label: "Goal Dif", value: (data.review?.stats.goalDiff || 0) > 0 ? `+${data.review?.stats.goalDiff}` : data.review?.stats.goalDiff }
+                             ].map((s, i) => (
+                                 <div key={i} className="bg-neutral-800 p-4 rounded text-center border border-white/5">
+                                     <div className="text-2xl font-black text-white font-oswald">{s.value}</div>
+                                     <div className="text-[10px] text-neutral-500 uppercase font-bold">{s.label}</div>
                                  </div>
                              ))}
-                             {data.history.length === 0 && <div className="text-neutral-600 text-xs italic">No major headlines.</div>}
                          </div>
-                     </div>
 
-                     {/* AWARDS ROW */}
-                     <div className="md:col-span-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
-                         {[
-                             { title: "Player of the Year", icon: "⭐", data: data.awards.poty },
-                             { title: "Young Player", icon: "💎", data: data.awards.ypos },
-                             { title: "Golden Boot", icon: "👟", data: data.awards.goldenBoot },
-                             { title: "Playmaker", icon: "🎯", data: data.awards.playmaker },
-                         ].map((award, i) => (
-                             <div key={i} className="bg-neutral-900 border border-white/10 rounded-lg p-4 flex flex-col animate-in slide-in-from-bottom-4 duration-500" style={{ animationDelay: `${1000 + (i * 100)}ms` }}>
-                                 <div className="flex justify-between items-start mb-3">
-                                     <span className="text-[10px] font-bold uppercase text-yellow-500 tracking-wider">{award.title}</span>
-                                     <span>{award.icon}</span>
-                                 </div>
-                                 <div className="font-bold text-white text-lg leading-tight">{award.data.name}</div>
-                                 <div className="text-xs text-neutral-500 mt-1">{award.data.club}</div>
-                                 <div className="mt-auto pt-3 border-t border-white/5 text-right">
-                                     <span className="text-emerald-400 font-mono font-bold text-sm">{award.data.value}</span>
+                         <button
+                            onClick={() => setStep(2)}
+                            className="w-full bg-white hover:bg-neutral-200 text-neutral-900 font-bold uppercase py-4 rounded mt-6 transition-colors shadow-lg"
+                         >
+                             Next Page
+                         </button>
+                     </div>
+                 )}
+
+                 {/* PAGE 2: PERFORMERS & FINANCES */}
+                 {step === 2 && (
+                     <div className="flex-1 flex flex-col p-8 animate-in slide-in-from-right duration-500">
+                         <div className="text-center mb-8">
+                             <h2 className="text-3xl font-black text-white font-oswald uppercase tracking-tight">Season Highlights</h2>
+                         </div>
+
+                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+                             {/* Player of Season */}
+                             <div className="space-y-4">
+                                 <h3 className="text-xs font-bold text-neutral-500 uppercase tracking-widest">Player of the Season</h3>
+                                 <div className="bg-gradient-to-br from-neutral-800 to-neutral-900 p-6 rounded border border-white/10 flex flex-col items-center text-center shadow-lg">
+                                     <div className="w-20 h-20 rounded-full bg-neutral-700 flex items-center justify-center text-4xl mb-4 border-2 border-yellow-500/50">
+                                         ⭐
+                                     </div>
+                                     <div className="text-xl font-black text-white uppercase font-oswald mb-1">{data.awards.poty.name}</div>
+                                     <div className="text-xs text-neutral-400 mb-4">{data.awards.poty.club}</div>
+                                     <div className="text-emerald-400 font-mono font-bold">{data.awards.poty.value}</div>
                                  </div>
                              </div>
-                         ))}
+
+                             {/* Other Awards */}
+                             <div className="space-y-4">
+                                 <h3 className="text-xs font-bold text-neutral-500 uppercase tracking-widest">Other Honors</h3>
+                                 <div className="grid grid-cols-2 gap-4">
+                                     <div className="bg-neutral-950 p-4 rounded border border-white/5">
+                                         <div className="text-[10px] text-yellow-500 uppercase font-bold mb-1">🥇 Top Scorer</div>
+                                         <div className="text-white font-bold text-sm truncate">{data.awards.goldenBoot.name}</div>
+                                         <div className="text-neutral-500 text-xs">{data.awards.goldenBoot.value} Goals</div>
+                                     </div>
+                                     <div className="bg-neutral-950 p-4 rounded border border-white/5">
+                                         <div className="text-[10px] text-blue-400 uppercase font-bold mb-1">🌟 Breakthrough</div>
+                                         <div className="text-white font-bold text-sm truncate">{data.awards.breakthrough.name}</div>
+                                         <div className="text-neutral-500 text-xs">{data.awards.breakthrough.club}</div>
+                                     </div>
+                                     <div className="bg-neutral-950 p-4 rounded border border-white/5">
+                                         <div className="text-[10px] text-emerald-400 uppercase font-bold mb-1">📈 Most Improved</div>
+                                         <div className="text-white font-bold text-sm truncate">{data.awards.mostImprovedClub.name}</div>
+                                     </div>
+                                     <div className="bg-neutral-950 p-4 rounded border border-white/5">
+                                         <div className="text-[10px] text-purple-400 uppercase font-bold mb-1">🧤 Golden Glove</div>
+                                         <div className="text-white font-bold text-sm truncate">{data.awards.goldenGlove.name}</div>
+                                         <div className="text-neutral-500 text-xs">{data.awards.goldenGlove.value} Clean Sheets</div>
+                                     </div>
+                                 </div>
+                             </div>
+                         </div>
+
+                         {/* Financial Summary */}
+                         <div className="mt-auto mb-6">
+                             <h3 className="text-xs font-bold text-neutral-500 uppercase tracking-widest mb-4">Financial Summary</h3>
+                             <div className="bg-neutral-950 p-6 rounded border border-white/5">
+                                 <div className="grid grid-cols-2 gap-x-8 gap-y-4 mb-6 border-b border-white/5 pb-6">
+                                     <div className="flex justify-between">
+                                         <span className="text-neutral-400 text-sm">Transfer Spend</span>
+                                         <span className="text-white font-mono">{fmtMoney(data.review?.financials.spend || 0)}</span>
+                                     </div>
+                                     <div className="flex justify-between">
+                                         <span className="text-neutral-400 text-sm">Income</span>
+                                         <span className="text-emerald-400 font-mono">{fmtMoney(data.review?.financials.income || 0)}</span>
+                                     </div>
+                                     <div className="flex justify-between">
+                                         <span className="text-neutral-400 text-sm">Turnover</span>
+                                         <span className="text-white font-mono">{fmtMoney(data.review?.financials.turnover || 0)}</span>
+                                     </div>
+                                 </div>
+
+                                 <div className="flex justify-between items-center">
+                                     <div>
+                                         <div className="text-[10px] text-neutral-500 uppercase font-bold mb-1">Next Season Budget</div>
+                                         <div className="text-2xl font-black text-emerald-400 font-oswald">{fmtMoney(data.review?.financials.budget_next || 0)}</div>
+                                     </div>
+                                     <div className="text-right">
+                                         <div className="text-[10px] text-neutral-500 uppercase font-bold mb-1">Wage Space</div>
+                                         <div className="text-xl font-bold text-white font-mono">{fmtWage(data.review?.financials.wage_bill || 0)}<span className="text-sm text-neutral-500 font-normal">/wk</span></div>
+                                     </div>
+                                 </div>
+                             </div>
+                         </div>
+
+                         <div className="flex gap-4">
+                             <button
+                                onClick={() => setStep(1)}
+                                className="flex-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-400 font-bold uppercase py-4 rounded transition-colors"
+                             >
+                                 Back
+                             </button>
+                             <button
+                                onClick={handleContinue}
+                                className="flex-[2] bg-white hover:bg-neutral-200 text-neutral-900 font-bold uppercase py-4 rounded transition-colors shadow-lg"
+                             >
+                                 Continue
+                             </button>
+                         </div>
                      </div>
-
-                 </div>
-
-                 <div className="p-8 text-center animate-in fade-in duration-1000 delay-[1500ms]">
-                     <button 
-                        onClick={handleContinue}
-                        className="bg-white text-black hover:bg-yellow-400 font-black uppercase text-lg px-12 py-4 rounded-full shadow-[0_0_30px_rgba(255,255,255,0.3)] transition-all transform hover:scale-105 active:scale-95"
-                     >
-                         Begin {parseInt(data.season.split('/')[0]) + 1} Campaign
-                     </button>
-                 </div>
+                 )}
 
              </div>
         </div>

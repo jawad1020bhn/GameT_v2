@@ -1,8 +1,9 @@
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useGame } from '../../context/GameContext';
 import { formatDate } from '../../services/engine';
 import { NewsItem } from '../../types';
+import { PressConferenceModal } from '../modals/PressConferenceModal';
 
 // --- FLAVOR GENERATORS (Fallback for legacy items) ---
 const SOURCES = [
@@ -50,8 +51,9 @@ const enrichNewsItem = (item: NewsItem) => {
 };
 
 export const News: React.FC = () => {
-  const { state } = useGame();
+  const { state, dispatch } = useGame();
   const [filter, setFilter] = React.useState<string>('all');
+  const [selectedInterview, setSelectedInterview] = useState<NewsItem['interactionData'] | null>(null);
 
   const enrichedNews = useMemo(() => state.news.map(enrichNewsItem), [state.news]);
 
@@ -132,7 +134,10 @@ export const News: React.FC = () => {
             {heroNews && (() => {
                 const style = getTypeStyles(heroNews);
                 return (
-                    <div className={`relative w-full h-80 rounded-2xl overflow-hidden mb-8 border border-neutral-800 shadow-2xl group cursor-pointer transition-all hover:scale-[1.01]`}>
+                    <div
+                        onClick={() => heroNews.interactionData && setSelectedInterview(heroNews.interactionData)}
+                        className={`relative w-full h-80 rounded-2xl overflow-hidden mb-8 border border-neutral-800 shadow-2xl group cursor-pointer transition-all hover:scale-[1.01]`}
+                    >
                         {/* Background Graphic */}
                         <div className={`absolute inset-0 bg-gradient-to-br ${style.gradient}`}></div>
                         <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20"></div>
@@ -195,7 +200,11 @@ export const News: React.FC = () => {
                 {secondaryNews.map(item => {
                     const style = getTypeStyles(item);
                     return (
-                        <div key={item.id} className="bg-neutral-900 border border-neutral-800 rounded-xl p-5 flex flex-col justify-between hover:border-neutral-600 transition-all group">
+                        <div
+                            key={item.id}
+                            onClick={() => item.interactionData && setSelectedInterview(item.interactionData)}
+                            className="bg-neutral-900 border border-neutral-800 rounded-xl p-5 flex flex-col justify-between hover:border-neutral-600 transition-all group cursor-pointer"
+                        >
                             <div>
                                 <div className="flex justify-between items-start mb-3">
                                     <span className={`text-[10px] font-bold uppercase ${style.color}`}>{item.image_type}</span>
@@ -221,10 +230,14 @@ export const News: React.FC = () => {
             <div className="space-y-4">
                 <h3 className="text-neutral-500 font-bold uppercase text-xs tracking-widest mb-2">Earlier Updates</h3>
                 {feedNews.map(item => (
-                    <div key={item.id} className="flex gap-4 p-4 bg-neutral-900/50 border border-neutral-800 rounded-lg hover:bg-neutral-800 transition-colors">
+                    <div
+                        key={item.id}
+                        onClick={() => item.interactionData && setSelectedInterview(item.interactionData)}
+                        className="flex gap-4 p-4 bg-neutral-900/50 border border-neutral-800 rounded-lg hover:bg-neutral-800 transition-colors cursor-pointer"
+                    >
                         <div className="flex-shrink-0 w-16 flex flex-col items-center justify-center border-r border-neutral-800 pr-4">
                              <span className="text-lg font-bold text-neutral-300 font-oswald">{new Date(item.date).getDate()}</span>
-                             <span className="text-[10px] text-neutral-500 uppercase font-bold">{new Date(item.date).toLocaleString('default', { month: 'short' })}</span>
+                             <span className="text-xs text-neutral-500 uppercase font-bold">{new Date(item.date).toLocaleString('default', { month: 'short' })}</span>
                         </div>
                         <div className="flex-1">
                             <div className="flex items-center gap-2 mb-1">
@@ -301,6 +314,18 @@ export const News: React.FC = () => {
         </div>
 
       </div>
+
+      {selectedInterview && (
+          <PressConferenceModal
+            data={selectedInterview}
+            onClose={() => setSelectedInterview(null)}
+            onRespond={(resp) => {
+                // Apply effects (simplified for UI feedback, logic should be in engine/reducer)
+                alert(`Effect Applied: Board ${resp.effect.board > 0 ? '+' : ''}${resp.effect.board}, Fans ${resp.effect.fans > 0 ? '+' : ''}${resp.effect.fans}`);
+                setSelectedInterview(null);
+            }}
+          />
+      )}
     </div>
   );
 };

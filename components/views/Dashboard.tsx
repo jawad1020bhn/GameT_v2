@@ -39,6 +39,26 @@ export const Dashboard: React.FC = () => {
       return a.read ? 1 : -1;
   });
 
+  const getBoardMood = (security: number) => {
+      if (security > 90) return { text: 'Ecstatic', color: 'text-emerald-400' };
+      if (security > 75) return { text: 'Happy', color: 'text-emerald-500' };
+      if (security > 60) return { text: 'Satisfied', color: 'text-yellow-500' };
+      if (security > 45) return { text: 'Concerned', color: 'text-orange-500' };
+      if (security > 30) return { text: 'Unhappy', color: 'text-red-500' };
+      return { text: 'Furious', color: 'text-red-700' };
+  };
+
+  const getFanMood = (happiness: number) => {
+      if (happiness > 90) return { text: 'Euphoric', color: 'text-purple-400' };
+      if (happiness > 70) return { text: 'Optimistic', color: 'text-emerald-400' };
+      if (happiness > 50) return { text: 'Content', color: 'text-blue-400' };
+      if (happiness > 30) return { text: 'Frustrated', color: 'text-orange-400' };
+      return { text: 'Toxic', color: 'text-red-600' };
+  };
+
+  const boardMood = getBoardMood(playerClub.job_security);
+  const fanMood = getFanMood(playerClub.fan_happiness);
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-12 gap-6 p-6 h-full overflow-y-auto bg-neutral-900">
       
@@ -49,13 +69,20 @@ export const Dashboard: React.FC = () => {
               <p className="text-neutral-500 text-sm">Overview & Tasks</p>
           </div>
           <div className="flex gap-4 text-sm">
-               <div className="px-4 py-2 bg-neutral-800 rounded border border-white/5">
-                   <span className="text-neutral-500 uppercase text-xs font-bold block">Job Status</span>
-                   <span className={`${playerClub.job_security > 60 ? 'text-emerald-500' : 'text-red-500'} font-bold`}>{playerClub.job_security}% Safe</span>
+               <div className="px-4 py-2 bg-neutral-800 rounded border border-white/5 text-center min-w-[100px]">
+                   <span className="text-neutral-500 uppercase text-[10px] font-bold block mb-0.5">Job Security</span>
+                   <div className="flex items-center justify-center gap-1">
+                        <div className={`w-2 h-2 rounded-full ${playerClub.job_security > 60 ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
+                        <span className="text-white font-bold">{playerClub.job_security}%</span>
+                   </div>
                </div>
-               <div className="px-4 py-2 bg-neutral-800 rounded border border-white/5">
-                   <span className="text-neutral-500 uppercase text-xs font-bold block">Board Mood</span>
-                   <span className="text-white font-bold">{playerClub.job_security > 80 ? 'Delighted' : 'Satisfied'}</span>
+               <div className="px-4 py-2 bg-neutral-800 rounded border border-white/5 text-center min-w-[100px]">
+                   <span className="text-neutral-500 uppercase text-[10px] font-bold block mb-0.5">Board Confidence</span>
+                   <span className={`${boardMood.color} font-bold`}>{boardMood.text}</span>
+               </div>
+               <div className="px-4 py-2 bg-neutral-800 rounded border border-white/5 text-center min-w-[100px]">
+                   <span className="text-neutral-500 uppercase text-[10px] font-bold block mb-0.5">Fan Atmosphere</span>
+                   <span className={`${fanMood.color} font-bold`}>{fanMood.text}</span>
                </div>
           </div>
       </div>

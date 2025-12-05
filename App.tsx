@@ -14,11 +14,12 @@ import { WorldNetwork } from './components/views/WorldNetwork';
 import { Settings } from './components/views/Settings';
 import { SimulationOverlay } from './components/modals/SimulationOverlay';
 import { SeasonGala } from './components/modals/SeasonGala';
-import { View, ManagerProfile, League } from './types';
+import { View, ManagerProfile, League, Club } from './types';
+import { ReputationEngine, REPUTATION_LEVELS } from './services/ReputationEngine';
 
 const OnboardingWizard = () => {
     const { state, dispatch, loadGame, hasSave } = useGame();
-    const [step, setStep] = useState<'intro' | 'create_manager' | 'select_club' | 'contract'>('intro');
+    const [step, setStep] = useState<'intro' | 'create_manager' | 'mode_selection' | 'select_club' | 'receive_offers' | 'contract'>('intro');
     const [managerName, setManagerName] = useState("");
     const [managerStyle, setManagerStyle] = useState<ManagerProfile['style']>('tactician');
     
@@ -27,6 +28,10 @@ const OnboardingWizard = () => {
     const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
     const [selectedLeagueId, setSelectedLeagueId] = useState<string | null>(null);
     const [selectedClubId, setSelectedClubId] = useState<number | null>(null);
+
+    // Offers State
+    const [offers, setOffers] = useState<Club[]>([]);
+    const [refreshCount, setRefreshCount] = useState(0);
 
     // Group leagues by country for selection
     const countryMap = React.useMemo(() => {
@@ -53,11 +58,37 @@ const OnboardingWizard = () => {
                 financial_acumen: 50,
                 media_handling: 50
             },
-            reputation: 50,
-            avatar_id: 1
+            reputation: {
+                level: 1,
+                name: "Unknown",
+                points: 0,
+                points_needed: 100
+            },
+            career: {
+                seasons_managed: 0,
+                matches_managed: 0,
+                wins: 0,
+                draws: 0,
+                losses: 0,
+                trophies_won: 0,
+                highest_league_finish: null,
+                european_experience: false,
+                clubs_managed: []
+            },
+            avatar_id: 1,
+            id: 0,
+            currentClubId: null,
+            history: [],
+            awards: []
         };
         dispatch({ type: 'CREATE_MANAGER', payload: profile });
-        setStep('select_club');
+        setStep('mode_selection');
+    };
+
+    const handleGenerateOffers = () => {
+        const generated = ReputationEngine.generateJobOffers(state.manager, state.leagues);
+        setOffers(generated);
+        setStep('receive_offers');
     };
 
     const selectedLeague = selectedLeagueId ? state.leagues[selectedLeagueId] : null;
@@ -141,6 +172,146 @@ const OnboardingWizard = () => {
                                 Next Step
                             </button>
                         </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    if (step === 'mode_selection') {
+        return (
+            <div className="h-screen w-screen bg-neutral-900 flex items-center justify-center p-8">
+                <div className="w-full max-w-5xl">
+                    <div className="text-center mb-12">
+                        <h2 className="text-4xl font-oswald text-white uppercase tracking-wide mb-2">Begin Your Journey</h2>
+                        <p className="text-neutral-400">How would you like to start your career?</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        {/* CHOOSE CLUB */}
+                        <button
+                            onClick={() => setStep('select_club')}
+                            className="group bg-neutral-800 border border-white/5 rounded-xl p-8 hover:bg-neutral-750 hover:border-emerald-500/50 transition-all text-left flex flex-col h-96 relative overflow-hidden"
+                        >
+                            <div className="absolute inset-0 bg-gradient-to-br from-emerald-900/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                            <div className="relative z-10 flex-1">
+                                <div className="w-16 h-16 bg-neutral-900 rounded-full flex items-center justify-center text-3xl mb-6 border border-white/10 group-hover:border-emerald-500/50 transition-colors">
+                                    🎯
+                                </div>
+                                <h3 className="text-2xl font-bold text-white font-oswald uppercase mb-2">Choose Club</h3>
+                                <p className="text-neutral-400 text-sm mb-6 leading-relaxed">
+                                    Browse all available leagues and hand-pick any team you want to manage. No restrictions.
+                                </p>
+                                <span className="inline-block bg-neutral-900 text-yellow-500 text-xs font-bold uppercase px-3 py-1 rounded border border-yellow-500/20">
+                                    ⚠️ Fantasy Mode
+                                </span>
+                            </div>
+                            <div className="relative z-10 mt-auto pt-6 border-t border-white/5">
+                                <span className="text-white font-bold uppercase text-sm tracking-widest group-hover:text-emerald-400 transition-colors">Select Path →</span>
+                            </div>
+                        </button>
+
+                        {/* RECEIVE OFFERS */}
+                        <button
+                            onClick={handleGenerateOffers}
+                            className="group bg-neutral-800 border border-white/5 rounded-xl p-8 hover:bg-neutral-750 hover:border-blue-500/50 transition-all text-left flex flex-col h-96 relative overflow-hidden"
+                        >
+                            <div className="absolute inset-0 bg-gradient-to-br from-blue-900/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                            <div className="relative z-10 flex-1">
+                                <div className="w-16 h-16 bg-neutral-900 rounded-full flex items-center justify-center text-3xl mb-6 border border-white/10 group-hover:border-blue-500/50 transition-colors">
+                                    📨
+                                </div>
+                                <h3 className="text-2xl font-bold text-white font-oswald uppercase mb-2">Receive Offers</h3>
+                                <p className="text-neutral-400 text-sm mb-6 leading-relaxed">
+                                    Start unemployed and receive realistic job offers based on your experience and reputation.
+                                </p>
+                                <span className="inline-block bg-neutral-900 text-blue-400 text-xs font-bold uppercase px-3 py-1 rounded border border-blue-500/20">
+                                    ⭐ Career Mode
+                                </span>
+                            </div>
+                            <div className="relative z-10 mt-auto pt-6 border-t border-white/5">
+                                <span className="text-white font-bold uppercase text-sm tracking-widest group-hover:text-blue-400 transition-colors">Select Path →</span>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    if (step === 'receive_offers') {
+        const rep = state.manager.reputation;
+        const repData = REPUTATION_LEVELS[rep.level];
+
+        return (
+            <div className="h-screen w-screen bg-neutral-900 flex flex-col p-8 overflow-hidden">
+                <div className="max-w-6xl mx-auto w-full flex-1 flex flex-col">
+                    {/* Header Profile */}
+                    <div className="bg-neutral-800 border border-white/10 rounded-xl p-8 mb-8 flex justify-between items-center">
+                        <div>
+                            <h2 className="text-3xl font-oswald text-white uppercase tracking-wide mb-1">{state.manager.name}</h2>
+                            <div className="flex gap-4 text-sm text-neutral-400">
+                                <span>Style: <span className="text-white font-bold">{state.manager.style}</span></span>
+                                <span>Reputation: <span className="text-white font-bold">{rep.name}</span></span>
+                            </div>
+                        </div>
+                        <div className="text-right">
+                            <div className="text-yellow-500 text-xl tracking-widest mb-1">{repData.stars}</div>
+                            <div className="text-xs text-neutral-500 uppercase font-bold tracking-wider">Level {rep.level}</div>
+                        </div>
+                    </div>
+
+                    <h3 className="text-xl font-oswald text-white uppercase tracking-wide mb-6">Available Opportunities ({offers.length})</h3>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                        {offers.map(club => (
+                            <div key={club.id} className="bg-neutral-800 border border-white/5 rounded-xl overflow-hidden flex flex-col hover:border-white/20 transition-all group">
+                                <div className="h-24 bg-gradient-to-r from-neutral-900 to-neutral-800 p-6 flex items-center justify-between">
+                                    <div className="w-12 h-12 bg-neutral-700 rounded-full flex items-center justify-center font-bold text-white border border-white/10 text-xl">
+                                        {club.name.charAt(0)}
+                                    </div>
+                                    <div className="text-right">
+                                        <div className="text-white font-bold font-oswald uppercase">{club.name}</div>
+                                        <div className="text-[10px] text-neutral-400">{state.leagues[club.leagueId]?.name}</div>
+                                    </div>
+                                </div>
+                                <div className="p-6 space-y-4 flex-1">
+                                    <div className="flex justify-between text-sm border-b border-white/5 pb-2">
+                                        <span className="text-neutral-500">Budget</span>
+                                        <span className="text-emerald-400 font-mono">£{(club.budget/1000000).toFixed(1)}M</span>
+                                    </div>
+                                    <div className="flex justify-between text-sm border-b border-white/5 pb-2">
+                                        <span className="text-neutral-500">Wage</span>
+                                        <span className="text-white font-mono">£{(club.wage_budget_weekly/1000).toFixed(0)}k/wk</span>
+                                    </div>
+                                    <div className="flex justify-between text-sm border-b border-white/5 pb-2">
+                                        <span className="text-neutral-500">Expectation</span>
+                                        <span className="text-white font-bold">{club.board_expectations.league_position_target <= 6 ? 'High' : 'Medium'}</span>
+                                    </div>
+                                    <p className="text-xs text-neutral-400 italic pt-2">
+                                        "{club.owner.patience < 40 ? "We need immediate results." : "Build for the future."}"
+                                    </p>
+                                </div>
+                                <div className="p-4 bg-neutral-900 border-t border-white/5">
+                                    <button
+                                        onClick={() => { setSelectedClubId(club.id); setStep('contract'); }}
+                                        className="w-full bg-white text-neutral-900 font-bold uppercase py-3 rounded text-xs tracking-widest hover:bg-neutral-200 transition-colors"
+                                    >
+                                        View Contract
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="text-center mt-auto">
+                        <button
+                            onClick={() => { setRefreshCount(c => c+1); handleGenerateOffers(); }}
+                            disabled={refreshCount >= 2}
+                            className="text-neutral-400 hover:text-white font-bold uppercase text-xs tracking-widest transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                            {refreshCount >= 2 ? "No more offers available" : "🔄 Refresh Offers (Wait 7 Days)"}
+                        </button>
                     </div>
                 </div>
             </div>
@@ -400,7 +571,7 @@ const OnboardingWizard = () => {
                         </div>
 
                         <div className="p-6 border-t border-white/5 bg-neutral-950 flex gap-4">
-                            <button onClick={() => setSelectionStage('club')} className="flex-1 py-4 text-neutral-500 font-bold uppercase text-xs hover:text-white transition-colors hover:bg-neutral-900 rounded">
+                            <button onClick={() => setStep(step === 'receive_offers' ? 'receive_offers' : 'select_club')} className="flex-1 py-4 text-neutral-500 font-bold uppercase text-xs hover:text-white transition-colors hover:bg-neutral-900 rounded">
                                 Decline Offer
                             </button>
                             <button 

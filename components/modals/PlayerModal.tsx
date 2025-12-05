@@ -1,13 +1,30 @@
 
 import React from 'react';
-import { Player } from '../../types';
+import { useGame } from '../../context/GameContext';
+import { Player, GrowthCurve } from '../../types';
+import { ScoutingEngine } from '../../services/ScoutingEngine';
+import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 
 interface PlayerModalProps {
   player: Player;
   onClose: () => void;
 }
 
-const AttributeBar = ({ label, value, max = 99 }: { label: string; value: number; max?: number }) => {
+const AttributeBar = ({ label, value, displayValue, max = 99, hidden = false }: { label: string; value: number; displayValue?: string; max?: number; hidden?: boolean }) => {
+  if (hidden) {
+    return (
+        <div className="mb-2 opacity-50">
+            <div className="flex justify-between items-end mb-0.5">
+                <span className="text-[10px] uppercase font-bold text-neutral-400 tracking-wider">{label}</span>
+                <span className="text-xs font-mono font-bold text-neutral-500">??</span>
+            </div>
+            <div className="h-1.5 w-full bg-neutral-800/80 rounded-sm overflow-hidden border border-neutral-700/50">
+                <div className="h-full bg-neutral-800 w-full animate-pulse"></div>
+            </div>
+        </div>
+    );
+  }
+
   let color = 'bg-neutral-500';
   if (value >= 90) color = 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]';
   else if (value >= 80) color = 'bg-emerald-600';
@@ -21,7 +38,7 @@ const AttributeBar = ({ label, value, max = 99 }: { label: string; value: number
     <div className="mb-2">
       <div className="flex justify-between items-end mb-0.5">
         <span className="text-[10px] uppercase font-bold text-neutral-400 tracking-wider">{label}</span>
-        <span className={`text-xs font-mono font-bold ${value >= 80 ? 'text-white' : 'text-neutral-300'}`}>{value}</span>
+        <span className={`text-xs font-mono font-bold ${value >= 80 ? 'text-white' : 'text-neutral-300'}`}>{displayValue || value}</span>
       </div>
       <div className="h-1.5 w-full bg-neutral-800/80 rounded-sm overflow-hidden border border-neutral-700/50">
         <div className={`h-full ${color} transition-all duration-500`} style={{ width: `${width}%` }}></div>
@@ -39,6 +56,29 @@ const StatBox = ({ label, value, sub = "", highlight = false }: { label: string;
 );
 
 export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose }) => {
+  const { playerClub } = useGame();
+
+  // FOG OF WAR LOGIC
+  const getScoutingInfo = () => {
+      if (!playerClub) return { visible: true, knowledge: 100 };
+      if (player.clubId === playerClub.id) return { visible: true, knowledge: 100 };
+      if (player.reputation >= 85) return { visible: true, knowledge: 100 };
+      if (playerClub.scouting.assignments.some(a => a.reports.includes(player.id))) return { visible: true, knowledge: 100 };
+
+      // Default to regional knowledge
+      // We don't have player region stored explicitly, assume simplified logic or random?
+      // Let's assume based on League or Nationality?
+      // For MVP, lets use a simple hash of ID to pick a region if not stored.
+      // But we added scouting_knowledge to Club.
+      // Let's assume player has no region field, so we default to 0 knowledge unless scouted directly.
+      return { visible: false, knowledge: 0 };
+  };
+
+  const { visible, knowledge } = getScoutingInfo();
+
+  // Helper for masking
+  const mask = (val: number) => ScoutingEngine.getMaskedAttribute(val, knowledge);
+
   // Prevent scrolling when modal is open
   React.useEffect(() => {
     document.body.style.overflow = 'hidden';
@@ -87,13 +127,13 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose }) => 
               <div className="text-center">
                   <div className="text-xs text-neutral-500 font-bold uppercase">Overall</div>
                   <div className="text-4xl font-bold text-white font-oswald bg-neutral-800 px-3 py-1 rounded border border-neutral-700 shadow-inner">
-                    {player.overall}
+                    {visible ? player.overall : '?'}
                   </div>
               </div>
               <div className="text-center">
                   <div className="text-xs text-neutral-500 font-bold uppercase">Potential</div>
                   <div className="text-4xl font-bold text-emerald-400 font-oswald bg-neutral-800 px-3 py-1 rounded border border-neutral-700 shadow-inner">
-                    {player.potential}
+                    {visible ? player.potential : '?'}
                   </div>
               </div>
               <button 
@@ -111,26 +151,53 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose }) => 
                 
                 {/* Left Column: Attributes */}
                 <div className="lg:col-span-1 space-y-6">
-                    <div className="bg-neutral-950/50 p-5 rounded-lg border border-neutral-800">
+                    <div className="bg-neutral-950/50 p-5 rounded-lg border border-neutral-800 relative overflow-hidden">
+                        {!visible && <div className="absolute inset-0 z-10 flex items-center justify-center bg-neutral-950/80 backdrop-blur-sm"><span className="text-white font-bold font-oswald uppercase tracking-widest border border-white/20 px-4 py-2 rounded">Scouting Required</span></div>}
                         <h3 className="text-emerald-500 font-bold uppercase text-sm tracking-widest mb-4 border-b border-neutral-800 pb-2">Technical</h3>
-                        <AttributeBar label="Shooting" value={player.attributes.shooting} />
-                        <AttributeBar label="Passing" value={player.attributes.passing} />
-                        <AttributeBar label="Dribbling" value={player.attributes.dribbling} />
-                        <AttributeBar label="Set Pieces" value={player.attributes.set_pieces} />
-                        <AttributeBar label="Goalkeeping" value={player.attributes.goalkeeping} max={20} />
+                        <AttributeBar label="Shooting" value={player.attributes.shooting} displayValue={mask(player.attributes.shooting)} hidden={!visible} />
+                        <AttributeBar label="Passing" value={player.attributes.passing} displayValue={mask(player.attributes.passing)} hidden={!visible} />
+                        <AttributeBar label="Dribbling" value={player.attributes.dribbling} displayValue={mask(player.attributes.dribbling)} hidden={!visible} />
+                        <AttributeBar label="Set Pieces" value={player.attributes.set_pieces} displayValue={mask(player.attributes.set_pieces)} hidden={!visible} />
+                        <AttributeBar label="Goalkeeping" value={player.attributes.goalkeeping} displayValue={mask(player.attributes.goalkeeping)} max={20} hidden={!visible} />
                     </div>
 
-                    <div className="bg-neutral-950/50 p-5 rounded-lg border border-neutral-800">
+                    <div className="bg-neutral-950/50 p-5 rounded-lg border border-neutral-800 relative overflow-hidden">
+                        {!visible && <div className="absolute inset-0 z-10 flex items-center justify-center bg-neutral-950/80 backdrop-blur-sm"></div>}
                         <h3 className="text-emerald-500 font-bold uppercase text-sm tracking-widest mb-4 border-b border-neutral-800 pb-2">Physical & Mental</h3>
-                        <AttributeBar label="Pace" value={player.attributes.pace} />
-                        <AttributeBar label="Physical" value={player.attributes.physical} />
-                        <AttributeBar label="Mental" value={player.attributes.mental} />
-                        <AttributeBar label="Defending" value={player.attributes.defending} />
+                        <AttributeBar label="Pace" value={player.attributes.pace} displayValue={mask(player.attributes.pace)} hidden={!visible} />
+                        <AttributeBar label="Physical" value={player.attributes.physical} displayValue={mask(player.attributes.physical)} hidden={!visible} />
+                        <AttributeBar label="Mental" value={player.attributes.mental} displayValue={mask(player.attributes.mental)} hidden={!visible} />
+                        <AttributeBar label="Defending" value={player.attributes.defending} displayValue={mask(player.attributes.defending)} hidden={!visible} />
                     </div>
                 </div>
 
-                {/* Middle Column: Status & Health */}
+                {/* Middle Column: Growth & Status */}
                 <div className="lg:col-span-1 space-y-6">
+                    {/* Development & Growth (UI Improvement 2) */}
+                    <div className="bg-neutral-950/50 p-5 rounded-lg border border-neutral-800">
+                         <div className="flex justify-between items-center mb-4 border-b border-neutral-800 pb-2">
+                             <h3 className="text-blue-400 font-bold uppercase text-sm tracking-widest">Growth Trajectory</h3>
+                             <div className="flex items-center gap-2">
+                                {player.season_stats.avg_rating > 7.5 && <span className="text-emerald-500 text-xs font-bold">▲ Form Boost</span>}
+                                <span className="text-[10px] uppercase font-bold bg-neutral-800 px-2 py-1 rounded text-neutral-400">{player.growth_curve || 'Steady'}</span>
+                             </div>
+                         </div>
+                         <div className="h-32 w-full">
+                             <ResponsiveContainer width="100%" height="100%">
+                                <LineChart data={[{ age: player.age, overall: player.overall }, { age: player.age + 3, overall: player.potential }]}>
+                                    <XAxis dataKey="age" hide />
+                                    <YAxis domain={[player.overall - 5, 99]} hide />
+                                    <Tooltip contentStyle={{backgroundColor: '#171717', border: '1px solid #333'}} />
+                                    <Line type="monotone" dataKey="overall" stroke="#3b82f6" strokeWidth={2} dot={{r:4}} />
+                                </LineChart>
+                             </ResponsiveContainer>
+                         </div>
+                         <div className="flex justify-between text-xs text-neutral-500 mt-2">
+                             <span>Current ({player.age}yo)</span>
+                             <span>Potential Peak</span>
+                         </div>
+                    </div>
+
                     <div className="bg-neutral-950/50 p-5 rounded-lg border border-neutral-800">
                          <h3 className="text-emerald-500 font-bold uppercase text-sm tracking-widest mb-4 border-b border-neutral-800 pb-2">Current Status</h3>
                          <div className="space-y-4">
@@ -183,6 +250,21 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose }) => 
 
                 {/* Right Column: Contract & Info */}
                 <div className="lg:col-span-1 space-y-6">
+                    <div className="bg-neutral-950/50 p-5 rounded-lg border border-neutral-800">
+                        <h3 className="text-purple-500 font-bold uppercase text-sm tracking-widest mb-4 border-b border-neutral-800 pb-2">Dynamic Roles</h3>
+                        <div className="flex flex-wrap gap-2">
+                            {player.roles && player.roles.length > 0 ? (
+                                player.roles.map(role => (
+                                    <span key={role} className="px-2 py-1 bg-purple-900/30 border border-purple-500/30 text-purple-200 text-[10px] uppercase font-bold rounded tracking-wider shadow-sm">
+                                        {role}
+                                    </span>
+                                ))
+                            ) : (
+                                <span className="text-xs text-neutral-600 italic">No specialized roles yet.</span>
+                            )}
+                        </div>
+                    </div>
+
                     <div className="bg-neutral-950/50 p-5 rounded-lg border border-neutral-800">
                         <h3 className="text-yellow-500 font-bold uppercase text-sm tracking-widest mb-4 border-b border-neutral-800 pb-2">Contract & Value</h3>
                         <div className="grid grid-cols-1 gap-3">

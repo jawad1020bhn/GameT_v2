@@ -1,13 +1,23 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useGame } from '../../context/GameContext';
 import { upgradeFacility } from '../../services/engine';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
-import { SponsorDeal } from '../../types';
+import { SponsorDeal, JuniorCandidate, Player } from '../../types';
+import { YouthEngine } from '../../services/YouthEngine';
+import { generatePlayer } from '../../constants';
 
 export const Headquarters: React.FC = () => {
     const { playerClub, dispatch, state } = useGame();
-    const [activeTab, setActiveTab] = useState<'facilities' | 'finance' | 'commercial' | 'stadium' | 'boardroom' | 'staff'>('facilities');
+    const [activeTab, setActiveTab] = useState<'facilities' | 'finance' | 'commercial' | 'stadium' | 'boardroom' | 'staff' | 'youth'>('facilities');
+
+    // Lazy load youth candidates
+    useEffect(() => {
+        if (playerClub && (!playerClub.junior_candidates || playerClub.junior_candidates.length === 0)) {
+            playerClub.junior_candidates = YouthEngine.generateCandidates(playerClub);
+            // We don't dispatch here to avoid render loops, but it persists in ref if we navigate away
+        }
+    }, [playerClub]);
 
     if (!playerClub) return null;
 
@@ -19,6 +29,24 @@ export const Headquarters: React.FC = () => {
         if (upgradeFacility(playerClub, type)) {
             dispatch({ type: 'UPDATE_STATE', payload: { ...state } }); // Force re-render logic handled via context update
         }
+    };
+
+    const handleSignYouth = (candidate: JuniorCandidate) => {
+        if (playerClub.budget < candidate.signing_cost) return;
+
+        playerClub.budget -= candidate.signing_cost;
+        playerClub.junior_candidates = playerClub.junior_candidates.filter(c => c.id !== candidate.id);
+
+        const newId = Date.now();
+        const player: Player = generatePlayer(newId, playerClub.id, candidate.position as any, candidate.true_potential - 15, 16);
+        // Adjust potential to match candidate
+        player.potential = candidate.true_potential;
+        player.name = candidate.name;
+        player.squad_role = 'prospect';
+
+        playerClub.players.push(player);
+
+        dispatch({ type: 'UPDATE_STATE', payload: { ...state } });
     };
 
     const acceptSponsor = (offer: SponsorDeal) => {
@@ -40,6 +68,12 @@ export const Headquarters: React.FC = () => {
         }
 
         playerClub.infrastructure.stadium.ticket_price = newPrice;
+        dispatch({ type: 'UPDATE_STATE', payload: { ...state } });
+    };
+
+    const updateStrategy = (key: string, value: any) => {
+        if (!playerClub.financial_strategy) return;
+        playerClub.financial_strategy = { ...playerClub.financial_strategy, [key]: value };
         dispatch({ type: 'UPDATE_STATE', payload: { ...state } });
     };
 
@@ -157,12 +191,12 @@ export const Headquarters: React.FC = () => {
                     <h2 className="text-4xl font-bold text-white font-oswald uppercase tracking-tight">Club Operations</h2>
                     <p className="text-neutral-400 text-sm font-mono">Facilities & Finance</p>
                 </div>
-                <div className="flex gap-2 bg-neutral-900 p-1 rounded-lg border border-white/10">
-                    {['facilities', 'finance', 'commercial', 'stadium', 'boardroom', 'staff'].map(tab => (
+                <div className="flex gap-2 bg-neutral-900 p-1 rounded-lg border border-white/10 overflow-x-auto max-w-2xl">
+                    {['facilities', 'finance', 'commercial', 'stadium', 'boardroom', 'staff', 'youth'].map(tab => (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab as any)}
-                            className={`px-4 py-2 rounded font-bold uppercase text-xs transition-all ${activeTab === tab ? 'bg-emerald-600 text-white shadow' : 'text-neutral-400 hover:text-white hover:bg-neutral-800'}`}
+                            className={`px-4 py-2 rounded font-bold uppercase text-xs transition-all whitespace-nowrap ${activeTab === tab ? 'bg-emerald-600 text-white shadow' : 'text-neutral-400 hover:text-white hover:bg-neutral-800'}`}
                         >
                             {tab}
                         </button>
@@ -196,6 +230,94 @@ export const Headquarters: React.FC = () => {
                 {/* FINANCE TAB */}
                 {activeTab === 'finance' && (
                     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
+
+                        {/* Strategy & Bank Controls */}
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="lg:col-span-2 bg-neutral-900 rounded-xl border border-white/10 p-6 shadow-lg">
+                                <h3 className="text-white font-bold uppercase tracking-widest text-sm mb-6 flex items-center gap-2">
+                                    Financial Strategy
+                                </h3>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                    <div>
+                                        <label className="block text-xs font-bold text-neutral-500 uppercase mb-2">Ticket Pricing Policy</label>
+                                        <select
+                                            value={playerClub.financial_strategy?.ticket_pricing || 'normal'}
+                                            onChange={(e) => updateStrategy('ticket_pricing', e.target.value)}
+                                            className="w-full bg-neutral-950 text-white text-sm p-3 rounded border border-neutral-800 focus:border-emerald-500 outline-none"
+                                        >
+                                            <option value="very_low">Very Low (Max Attendance)</option>
+                                            <option value="low">Low</option>
+                                            <option value="normal">Normal</option>
+                                            <option value="high">High</option>
+                                            <option value="very_high">Very High (Max Revenue)</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-neutral-500 uppercase mb-2">Merchandise Focus</label>
+                                        <select
+                                            value={playerClub.financial_strategy?.merchandise_focus || 'local'}
+                                            onChange={(e) => updateStrategy('merchandise_focus', e.target.value)}
+                                            className="w-full bg-neutral-950 text-white text-sm p-3 rounded border border-neutral-800 focus:border-emerald-500 outline-none"
+                                        >
+                                            <option value="local">Local (Low Cost)</option>
+                                            <option value="national">National (Medium Cost)</option>
+                                            <option value="global">Global (High Cost/High Reward)</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-neutral-500 uppercase mb-2">Debt Repayment</label>
+                                        <select
+                                            value={playerClub.financial_strategy?.debt_repayment || 'balanced'}
+                                            onChange={(e) => updateStrategy('debt_repayment', e.target.value)}
+                                            className="w-full bg-neutral-950 text-white text-sm p-3 rounded border border-neutral-800 focus:border-emerald-500 outline-none"
+                                        >
+                                            <option value="minimum">Minimum</option>
+                                            <option value="balanced">Balanced</option>
+                                            <option value="aggressive">Aggressive</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Bank Operations */}
+                            <div className="bg-neutral-900 rounded-xl border border-white/10 p-6 shadow-lg">
+                                <h3 className="text-white font-bold uppercase tracking-widest text-sm mb-6 flex items-center gap-2">
+                                    Bank Operations
+                                </h3>
+                                <div className="space-y-4">
+                                    <div className="bg-neutral-950 p-4 rounded border border-neutral-800">
+                                        <p className="text-xs text-neutral-500 uppercase font-bold mb-1">Current Debt</p>
+                                        <p className="text-2xl font-mono font-bold text-red-400">{formatMoney(playerClub.debt)}</p>
+                                        <p className="text-[10px] text-neutral-600 mt-1">Interest Rate: 5.0% APR</p>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => {
+                                                playerClub.debt += 5000000;
+                                                playerClub.budget += 5000000;
+                                                dispatch({ type: 'UPDATE_STATE', payload: { ...state } });
+                                            }}
+                                            className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 rounded text-[10px] font-bold uppercase text-white transition-colors"
+                                        >
+                                            Borrow £5M
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                if (playerClub.budget >= 5000000 && playerClub.debt >= 5000000) {
+                                                    playerClub.debt -= 5000000;
+                                                    playerClub.budget -= 5000000;
+                                                    dispatch({ type: 'UPDATE_STATE', payload: { ...state } });
+                                                }
+                                            }}
+                                            disabled={playerClub.budget < 5000000 || playerClub.debt < 5000000}
+                                            className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-600 rounded text-[10px] font-bold uppercase text-white transition-colors"
+                                        >
+                                            Repay £5M
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
 
                         {/* Top Summary Cards */}
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -739,6 +861,58 @@ export const Headquarters: React.FC = () => {
                         ) : (
                             <div className="col-span-3 text-center py-12 text-neutral-500 italic">No staff hired yet.</div>
                         )}
+                    </div>
+                )}
+
+                {/* YOUTH TAB */}
+                {activeTab === 'youth' && (
+                    <div className="bg-neutral-900 rounded-xl border border-white/10 p-6 shadow-lg animate-in fade-in">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-white font-bold uppercase tracking-widest text-sm">Youth Intake Pipeline</h3>
+                            <span className="text-xs text-neutral-500 font-mono">Next Intake: March 15th</span>
+                        </div>
+
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left">
+                                <thead className="bg-neutral-950 text-xs uppercase text-neutral-500 font-bold">
+                                    <tr>
+                                        <th className="p-3 rounded-l">Name</th>
+                                        <th className="p-3">Pos</th>
+                                        <th className="p-3 text-center">Grade</th>
+                                        <th className="p-3 text-right">Sign Cost</th>
+                                        <th className="p-3 rounded-r text-center">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="text-sm">
+                                    {playerClub.junior_candidates && playerClub.junior_candidates.length > 0 ? (
+                                        playerClub.junior_candidates.map((c: JuniorCandidate) => (
+                                            <tr key={c.id} className="border-b border-white/5 hover:bg-neutral-800 transition-colors">
+                                                <td className="p-3 font-bold text-white">{c.name}</td>
+                                                <td className="p-3 font-mono text-neutral-300">{c.position}</td>
+                                                <td className="p-3 text-center">
+                                                    <span className={`px-2 py-1 rounded text-xs font-bold ${c.perceived_grade.startsWith('A') ? 'bg-emerald-900/50 text-emerald-400' : c.perceived_grade === 'B' ? 'bg-blue-900/50 text-blue-400' : 'bg-neutral-800 text-neutral-500'}`}>
+                                                        {c.perceived_grade}
+                                                    </span>
+                                                </td>
+                                                <td className="p-3 text-right font-mono text-white">{formatMoneyK(c.signing_cost)}</td>
+                                                <td className="p-3 text-center">
+                                                    <button
+                                                        onClick={() => handleSignYouth(c)}
+                                                        className="px-4 py-1 bg-white hover:bg-neutral-200 text-neutral-900 font-bold uppercase text-[10px] rounded transition-colors"
+                                                    >
+                                                        Sign
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))
+                                    ) : (
+                                        <tr>
+                                            <td colSpan={5} className="p-8 text-center text-neutral-500 italic">Academy pipeline empty.</td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 )}
             </div>

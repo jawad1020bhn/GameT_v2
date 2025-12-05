@@ -1,7 +1,86 @@
-import { GameState, League, Club, Fixture, GameMessage, Player, NewsItem, Trophy, Negotiation, TransferOffer, View, MatchEvent, FacilityDetails, ContractOffer, Tactics, SeasonFinancials, GalaData } from '../types';
-import { generateFixtures, injectCupFixtures, getSeasonDates, generatePlayer, getRandomName } from '../constants';
+import { GameState, League, Club, Fixture, GameMessage, Player, NewsItem, Trophy, Negotiation, TransferOffer, View, MatchEvent, FacilityDetails, ContractOffer, Tactics, SeasonFinancials, GalaData, PlayerRole, GrowthCurve } from '../types';
+import { generatePlayer, getRandomName } from '../constants';
+import { CompetitionSystem } from './CompetitionSystem';
+import { ReputationEngine } from './ReputationEngine';
 import { NewsEngine } from './news_engine';
-import { AdvancedEngine } from './advanced_engine';
+import { RoleService } from './RoleService';
+import { AwardsEngine } from './AwardsEngine';
+import { TrainingEngine } from './TrainingEngine';
+import { FinancialEngine } from './FinancialEngine';
+import { InteractionEngine } from './InteractionEngine';
+import { TRANSFER_HEADLINES, CONTENT, NEWS_SOURCES } from './news_templates';
+
+// Helper to pick random item
+const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+
+// Helper: Check Transfer Window
+const isTransferWindow = (dateStr: string): boolean => {
+    const date = new Date(dateStr);
+    const m = date.getMonth(); // 0 = Jan, 6 = July, 7 = Aug
+    const d = date.getDate();
+    if (m === 0) return true; // Winter
+    if (m === 6 || m === 7) return true; // Summer
+    if (m === 8 && d < 2) return true; // Late Summer
+    return false;
+};
+
+// INTELLIGENT SQUAD ANALYSIS (Moved from AdvancedEngine)
+const getSquadNeeds = (club: Club): { position: string, priority: number } | null => {
+    const sorted = [...club.players].sort((a, b) => b.overall - a.overall);
+    const counts = { GK: 0, DEF: 0, MID: 0, FWD: 0, ST: 0 };
+    club.players.forEach(p => counts[p.position as keyof typeof counts]++);
+
+    if (counts.GK < 2) return { position: 'GK', priority: 10 };
+    if (counts.DEF < 6) return { position: 'DEF', priority: 9 };
+    if (counts.MID < 5) return { position: 'MID', priority: 9 };
+    if (counts.FWD + counts.ST < 4) return { position: 'FWD', priority: 8 };
+
+    const starterGK = sorted.find(p => p.position === 'GK');
+    const avgOvr = sorted.slice(0, 11).reduce((a, b) => a + b.overall, 0) / 11;
+
+    if (starterGK && starterGK.overall < avgOvr - 3) return { position: 'GK', priority: 7 };
+
+    // Check weak links in other positions
+    const weakDef = sorted.filter(p => p.position === 'DEF').slice(0, 4).find(p => p.overall < avgOvr - 4);
+    if (weakDef) return { position: 'DEF', priority: 6 };
+
+    const weakMid = sorted.filter(p => p.position === 'MID').slice(0, 3).find(p => p.overall < avgOvr - 4);
+    if (weakMid) return { position: 'MID', priority: 6 };
+
+    const weakAtt = sorted.filter(p => ['FWD', 'ST'].includes(p.position)).slice(0, 3).find(p => p.overall < avgOvr - 4);
+    if (weakAtt) return { position: 'FWD', priority: 6 };
+
+    if (club.budget > 50000000 && Math.random() < 0.3) {
+        const positions = ['MID', 'FWD', 'ST'];
+        return { position: positions[Math.floor(Math.random() * positions.length)], priority: 4 };
+    }
+
+    return null;
+};
+
+const scoreTransferTarget = (player: Player, buyer: Club, need: string): number => {
+    let score = 0;
+    if (player.position === need) score += 50;
+    else if (need === 'FWD' && player.position === 'ST') score += 40;
+    else if (need === 'ST' && player.position === 'FWD') score += 40;
+    else return 0;
+
+    const avgOvr = buyer.players.reduce((a, b) => a + b.overall, 0) / buyer.players.length;
+    if (player.overall > avgOvr + 5) score += 30;
+    else if (player.overall > avgOvr) score += 20;
+    else if (player.potential > avgOvr + 10) score += 25;
+    else score += 5;
+
+    if (player.age >= 23 && player.age <= 29) score += 15;
+    else if (player.age < 23) score += 10;
+    else score -= 5;
+
+    const affordability = buyer.budget / player.market_value;
+    if (affordability > 2) score += 20;
+    else if (affordability < 1) score = -100;
+
+    return score;
+};
 
 // Helper to add days to a YYYY-MM-DD string
 export const addDays = (dateStr: string, days: number): string => {
@@ -265,8 +344,12 @@ const getZoneControl = (club: Club): number => {
 const resolveDuel = (attacker: Player, defender: Player): 'win' | 'loss' | 'foul' => {
     const attackerScore = (attacker.attributes.dribbling * 0.4) + (attacker.attributes.pace * 0.4) + (attacker.attributes.mental * 0.2) + (attacker.form > 80 ? 5 : 0);
     const defenderScore = (defender.attributes.defending * 0.5) + (defender.attributes.physical * 0.3) + (defender.attributes.mental * 0.2);
-    const variance = Math.random() * 20 - 10;
-    if (attackerScore + variance > defenderScore) return 'win';
+
+    // Sigmoid Probability for realistic outcomes
+    const diff = attackerScore - defenderScore;
+    const winProb = 1 / (1 + Math.exp(-diff / 8));
+
+    if (Math.random() < winProb) return 'win';
     if (defender.attributes.physical > 80 && Math.random() < 0.1) return 'foul';
     return 'loss';
 };
@@ -281,8 +364,25 @@ const getTacticalAdvantage = (t1: Tactics, t2: Tactics): number => {
     if (t1.instructions.line_height > 70 && t2.instructions.passing_directness > 70) adv -= 10; // Counter attack vulnerability
     if (t1.instructions.pressing_intensity > 70 && t2.instructions.tempo < 40) adv += 10; // Caught in possession
 
+    // Specific Counters (Feature 2)
+    if (t1.formation === '5-3-2' && t2.formation === '4-3-3') adv += 15; // Defensive counters Possession
+    if (t1.formation === '4-4-2' && t2.formation === '3-5-2') adv += 15; // Direct counters High Line/Width
+
     return adv;
 };
+
+const calculateCohesion = (players: Player[]): number => {
+    const xi = players.sort((a,b) => b.overall - a.overall).slice(0, 11);
+    let score = 50; // Base
+
+    for(let i=0; i<xi.length; i++) {
+        if(xi[i].social_group === 'outcast') score -= 5;
+        for(let j=i+1; j<xi.length; j++) {
+            if(xi[i].social_group === xi[j].social_group) score += 1;
+        }
+    }
+    return Math.max(0, Math.min(100, score));
+}
 
 interface MatchStats {
     playerId: number;
@@ -293,9 +393,11 @@ interface MatchStats {
     red: boolean;
 }
 
-const simulateMatch = (home: Club, away: Club, strictness: number, isKnockout: boolean = false, weather: 'sunny' | 'rain' | 'snow' | 'cloudy' = 'sunny'): { homeGoals: number; awayGoals: number; events: MatchEvent[]; penalties?: boolean; playerStats: MatchStats[] } => {
+const simulateMatch = (home: Club, away: Club, strictness: number, isKnockout: boolean = false, weather: 'sunny' | 'rain' | 'snow' | 'cloudy' = 'sunny'): { homeGoals: number; awayGoals: number; events: MatchEvent[]; penalties?: boolean; playerStats: MatchStats[]; momentumHistory: number[] } => {
     let homeGoals = 0;
     let awayGoals = 0;
+    let momentum = 0; // -10 to 10
+    const momentumHistory: number[] = [];
     const events: MatchEvent[] = [];
     const playerStats: MatchStats[] = [...home.players, ...away.players].map(p => ({
         playerId: p.id, goals: 0, assists: 0, rating: 6.0 + (Math.random() * 1.0), yellow: false, red: false
@@ -303,11 +405,27 @@ const simulateMatch = (home: Club, away: Club, strictness: number, isKnockout: b
 
     const getStat = (pid: number) => playerStats.find(s => s.playerId === pid)!;
 
-    const homeControl = getZoneControl(home);
-    const awayControl = getZoneControl(away);
+    let homeControl = getZoneControl(home);
+    let awayControl = getZoneControl(away);
+
+    // Feature 3: Locker Room Social Ecosystem
+    const homeCohesion = calculateCohesion(home.players);
+    const awayCohesion = calculateCohesion(away.players);
+
+    homeControl += (homeCohesion - 50) / 5;
+    awayControl += (awayCohesion - 50) / 5;
+
+    const homeMods = RoleService.getClubRoleModifiers(home);
+    const awayMods = RoleService.getClubRoleModifiers(away);
 
     // Apply Tactical Advantage
-    const tacAdv = getTacticalAdvantage(home.tactics, away.tactics);
+    let tacAdv = getTacticalAdvantage(home.tactics, away.tactics);
+    tacAdv += (homeMods.tacticalAdaptability || 0) * 10;
+    tacAdv -= (awayMods.tacticalAdaptability || 0) * 10;
+
+    // Width Effect: Trade control for chances
+    if (home.tactics) homeControl -= (home.tactics.instructions.attacking_width - 50) / 10;
+    if (away.tactics) awayControl -= (away.tactics.instructions.attacking_width - 50) / 10;
 
     // Weather Effects
     let passingMod = 1.0;
@@ -317,7 +435,7 @@ const simulateMatch = (home: Club, away: Club, strictness: number, isKnockout: b
     if (weather === 'sunny') { staminaDrainMod = 1.05; } // Heat
 
     const totalControl = (homeControl * passingMod) + (awayControl * passingMod) + tacAdv;
-    const homeDominance = ((homeControl * passingMod) + tacAdv / 2) / totalControl;
+    const homeDominanceBase = ((homeControl * passingMod) + tacAdv / 2) / totalControl;
 
     // TACTICAL MODIFIERS
     let homeChanceMod = 1.0;
@@ -325,22 +443,74 @@ const simulateMatch = (home: Club, away: Club, strictness: number, isKnockout: b
     let homeCardMod = 1.0;
     let awayCardMod = 1.0;
 
-    if (home.tactics) {
-        homeChanceMod += (home.tactics.instructions.passing_directness - 50) / 200; // More direct = slightly more chances but less control
-        homeCardMod += (home.tactics.instructions.pressing_intensity - 50) / 100; // High press = more cards
-    }
-    if (away.tactics) {
-        awayChanceMod += (away.tactics.instructions.passing_directness - 50) / 200;
-        awayCardMod += (away.tactics.instructions.pressing_intensity - 50) / 100;
-    }
+    // Role Effects
+    homeChanceMod += (homeMods.homeAtmosphere || 0);
+    homeChanceMod -= (awayMods.defensiveOrganization || 0) * 0.5;
+    awayChanceMod -= (homeMods.defensiveOrganization || 0) * 0.5;
+
+    const applyTactics = (t: Tactics | undefined, isHome: boolean) => {
+        if (!t) return;
+        const wMod = (t.instructions.attacking_width - 50) / 100;
+        const pMod = (t.instructions.pressing_intensity - 50) / 100;
+        const dMod = (t.instructions.passing_directness - 50) / 200;
+        const tMod = (t.instructions.tackling_style - 50) / 50;
+
+        if (isHome) {
+            homeChanceMod += wMod + dMod;
+            homeCardMod += pMod + tMod;
+        } else {
+            awayChanceMod += wMod + dMod;
+            awayCardMod += pMod + tMod;
+        }
+    };
+
+    applyTactics(home.tactics, true);
+    applyTactics(away.tactics, false);
 
     for (let minute = 1; minute <= 90; minute++) {
+        momentumHistory.push(momentum);
+
+        // Feature 2: In-Game Adaptation
+        if (minute === 60 || minute === 75) {
+            const adapt = (team: Club, isHome: boolean, goalsFor: number, goalsAgainst: number) => {
+                if (!team.tactics) return;
+                const diff = goalsFor - goalsAgainst;
+                if (diff < -1) {
+                    // All Out Attack
+                    team.tactics.instructions.attacking_width = 90;
+                    team.tactics.instructions.pressing_intensity = 90;
+                    if (isHome) homeChanceMod += 0.2; else awayChanceMod += 0.2;
+                    if (isHome) awayChanceMod += 0.1; else homeChanceMod += 0.1; // Vulnerable
+                    events.push({ minute, type: 'commentary', text: `${team.name} are throwing everything forward!`, team: isHome ? 'home' : 'away' });
+                } else if (diff > 0 && minute > 70) {
+                    // Park the Bus
+                    team.tactics.instructions.line_height = 20;
+                    team.tactics.instructions.tempo = 20;
+                    if (isHome) awayChanceMod -= 0.3; else homeChanceMod -= 0.3; // Hard to break down
+                    events.push({ minute, type: 'commentary', text: `${team.name} are parking the bus to defend the lead.`, team: isHome ? 'home' : 'away' });
+                }
+            };
+            adapt(home, true, homeGoals, awayGoals);
+            adapt(away, false, awayGoals, homeGoals);
+        }
+
+        // Momentum Dynamics
+        if (momentum > 0.5) momentum -= 0.1;
+        else if (momentum < -0.5) momentum += 0.1;
+
+        const momEffect = momentum * 0.02; // Up to +/- 20% swing
+        const homeDominance = Math.min(0.95, Math.max(0.05, homeDominanceBase + momEffect));
+
         const isHomeAttack = Math.random() < homeDominance;
         const attackingTeam = isHomeAttack ? home : away;
         const defendingTeam = isHomeAttack ? away : home;
         const chanceMod = isHomeAttack ? homeChanceMod : awayChanceMod;
 
-        let actionProb = 0.04 * chanceMod;
+        // Creative Freedom: Chance for brilliance or turnover
+        const freedom = attackingTeam.tactics?.instructions.creative_freedom || 50;
+        const freedomBonus = Math.random() < (freedom / 500) ? 0.1 : 0;
+
+        let actionProb = (0.04 + freedomBonus) * chanceMod;
         if (minute > 80 && Math.abs(homeGoals - awayGoals) <= 1) actionProb = 0.08;
 
         if (Math.random() < actionProb) {
@@ -362,6 +532,10 @@ const simulateMatch = (home: Club, away: Club, strictness: number, isKnockout: b
             const duelResult = resolveDuel(attacker, defender);
 
             if (duelResult === 'win') {
+                // Momentum Swing
+                if (isHomeAttack) momentum = Math.min(10, momentum + 0.5);
+                else momentum = Math.max(-10, momentum - 0.5);
+
                 const shotQuality = (attacker.attributes.shooting + attacker.attributes.mental) / 2 * (1 - attackerFatigue * 0.3);
                 const gk = defendingTeam.players.find(p => p.position === 'GK') || defendingTeam.players[0];
                 const saveQuality = gk.attributes.goalkeeping + (Math.random() * 20);
@@ -372,7 +546,8 @@ const simulateMatch = (home: Club, away: Club, strictness: number, isKnockout: b
                 const xG = (0.7 * distance * angle) * (attacker.attributes.shooting / 100);
 
                 if (shotQuality + (Math.random() * 20) > saveQuality) {
-                    if (isHomeAttack) homeGoals++; else awayGoals++;
+                    if (isHomeAttack) { homeGoals++; momentum = 5; } // Goal Boost
+                    else { awayGoals++; momentum = -5; }
 
                     const sStats = getStat(attacker.id);
                     sStats.goals++;
@@ -411,7 +586,11 @@ const simulateMatch = (home: Club, away: Club, strictness: number, isKnockout: b
                 const dStats = getStat(defender.id);
                 const cardMod = isHomeAttack ? awayCardMod : homeCardMod;
 
-                if (cardRoll < (strictness / 4) * cardMod) {
+                // Aggression Effect
+                const aggression = defendingTeam.tactics?.instructions.tackling_style || 50;
+                const riskFactor = 1 + ((aggression - 50) / 50); // 0.5 to 2.0
+
+                if (cardRoll < (strictness / 4) * cardMod * riskFactor) {
                     events.push({ minute, type: 'card', text: `RED CARD! ${defender.name} is sent off!`, team: isHomeAttack ? 'away' : 'home' });
                     dStats.red = true;
                     dStats.rating -= 2.0;
@@ -439,7 +618,7 @@ const simulateMatch = (home: Club, away: Club, strictness: number, isKnockout: b
         }
     }
 
-    return { homeGoals, awayGoals, events, penalties, playerStats };
+    return { homeGoals, awayGoals, events, penalties, playerStats, momentumHistory };
 };
 
 const updatePlayersDaily = (club: Club, playedMatch: boolean, competition?: string | null, matchStats?: MatchStats[]) => {
@@ -453,6 +632,8 @@ const updatePlayersDaily = (club: Club, playedMatch: boolean, competition?: stri
 
     const tacticalBoost = assistant ? (assistant.attributes.coaching / 100) * 0.5 : 0.1;
     const healingBoost = physio ? (physio.attributes.healing / 100) * 0.2 : 0;
+
+    const clubMods = RoleService.getClubRoleModifiers(club);
 
     // Increase Tactical Familiarity if match played
     if (playedMatch && club.tactics) {
@@ -490,17 +671,102 @@ const updatePlayersDaily = (club: Club, playedMatch: boolean, competition?: stri
                     cStats.avg_rating = (cTotal + stat.rating) / cStats.appearances;
                     if (stat.rating > 8.5) cStats.mom_awards++;
                 }
+
+                // Monthly Stats
+                if (!p.monthly_stats) p.monthly_stats = { goals: 0, assists: 0, clean_sheets: 0, yellow_cards: 0, red_cards: 0, appearances: 0, avg_rating: 0, mom_awards: 0 };
+                const mStats = p.monthly_stats;
+                mStats.appearances++;
+                mStats.goals += stat.goals;
+                mStats.assists += stat.assists;
+                mStats.yellow_cards += stat.yellow ? 1 : 0;
+                mStats.red_cards += stat.red ? 1 : 0;
+                const mTotal = mStats.avg_rating * (mStats.appearances - 1);
+                mStats.avg_rating = (mTotal + stat.rating) / mStats.appearances;
+                if (stat.rating > 8.5) mStats.mom_awards++;
             }
         }
 
+        // Feature 5: Chronic Fatigue Accumulation
         if (playedMatch) {
             const fatigueHit = 15 + Math.random() * 10;
             p.fitness = Math.max(10, p.fitness - fatigueHit);
-            p.condition = Math.max(10, p.condition - 30); // Major condition hit after match
+            p.condition = Math.max(10, p.condition - 30);
             p.form = Math.min(100, Math.max(0, p.form + (Math.random() * 10 - 5)));
+            p.chronic_fatigue = Math.min(100, p.chronic_fatigue + 5);
         } else {
-            p.fitness = Math.min(100, p.fitness + 8 + Math.random() * 3 + fitnessRecovery);
-            p.condition = Math.min(100, p.condition + 20 + fitnessRecovery); // Recover condition fast
+            // RECOVERY
+            const roleDef = p.roles ? p.roles.map(r => RoleService.getRoleDefinition(r).modifiers(p)) : [];
+            const staminaRecoveryBonus = roleDef.reduce((sum, m) => sum + (m.staminaDecline || 0), 0);
+            p.fitness = Math.min(100, p.fitness + 8 + Math.random() * 3 + fitnessRecovery + (staminaRecoveryBonus * 5));
+            p.condition = Math.min(100, p.condition + 20 + fitnessRecovery);
+            p.chronic_fatigue = Math.max(0, p.chronic_fatigue - 1);
+
+            // --- GROWTH & DECAY ---
+            const trainingQuality = club.infrastructure.training_ground.level / 10;
+            const personalDevMod = roleDef.reduce((sum, m) => sum + (m.developmentSpeed || 0), 0);
+
+            // Feature 1: Dynamic Growth Curves
+            if (p.potential > p.overall) {
+                let curveMod = 1.0;
+                if (p.growth_curve === GrowthCurve.EARLY_PEAKER) {
+                    if (p.age <= 23) curveMod = 1.5; else curveMod = 0.2;
+                } else if (p.growth_curve === GrowthCurve.LATE_BLOOMER) {
+                    if (p.age < 24) curveMod = 0.5; else if (p.age <= 29) curveMod = 1.8;
+                } else if (p.growth_curve === GrowthCurve.ERRATIC) {
+                    curveMod = Math.random() * 2.5; // Chaos
+                }
+
+                const formFactor = Math.max(0.5, p.form / 60);
+                const ratingFactor = p.season_stats.appearances > 0 ? Math.max(0.8, p.season_stats.avg_rating / 6.5) : 1.0;
+
+                // Dynamic Potential Boost
+                if (p.season_stats.avg_rating > 7.5 && Math.random() < 0.01) p.potential = Math.min(99, p.potential + 1);
+
+                // MENTORSHIP BONUS
+                let mentorshipBonus = 0;
+                if (p.mentorId) {
+                    const mentor = club.players.find(m => m.id === p.mentorId);
+                    if (mentor) {
+                        mentorshipBonus = 0.5 + (mentor.personality.professionalism / 200);
+                        if (Math.random() < 0.001) {
+                            p.personality.professionalism = Math.min(100, p.personality.professionalism + 1);
+                            p.personality.ambition = Math.min(100, p.personality.ambition + 1);
+                        }
+                    } else {
+                        p.mentorId = undefined;
+                    }
+                }
+
+                const mentalityMod = p.personality.professionalism / 100;
+                const growthChance = 0.005 * (1 + trainingQuality + (clubMods.teamTrainingEfficiency || 0) + personalDevMod + mentorshipBonus) * formFactor * ratingFactor * curveMod * mentalityMod;
+
+                if (Math.random() < growthChance) {
+                    const keys = Object.keys(p.attributes) as (keyof typeof p.attributes)[];
+                    const key = keys[Math.floor(Math.random() * keys.length)];
+                    if (p.attributes[key] < 99) {
+                        p.attributes[key]++;
+                        if (Math.random() < 0.2) {
+                            const newOverall = Math.floor(Object.values(p.attributes).reduce((a, b) => a + b, 0) / Object.values(p.attributes).length);
+                            if (newOverall > p.overall) p.overall = newOverall;
+                        }
+                    }
+                }
+            }
+
+            // 2. DECAY (Old or Long-term Injured)
+            // Early Peakers decay faster
+            const decayAge = p.growth_curve === GrowthCurve.EARLY_PEAKER ? 29 : 32;
+            if (p.age > decayAge) {
+                const decayChance = 0.001 * (p.age - 30);
+                if (Math.random() < decayChance) {
+                    const physicalAttrs = ['pace', 'physical'] as const;
+                    const attr = physicalAttrs[Math.floor(Math.random() * physicalAttrs.length)];
+                    if (p.attributes[attr] > 10) {
+                        p.attributes[attr]--;
+                        if (Math.random() < 0.2) p.overall--;
+                    }
+                }
+            }
         }
 
         if (p.injury_status.type !== "none") {
@@ -510,10 +776,19 @@ const updatePlayersDaily = (club: Club, playedMatch: boolean, competition?: stri
                 p.injury_status.weeks_remaining = 0;
             }
         } else {
-            const redZoneMult = p.fitness < 75 ? 4 : 1;
-            if (Math.random() < 0.0005 * p.injury_status.proneness * redZoneMult * (1 - injuryReduction)) {
-                p.injury_status.type = "hamstring";
-                p.injury_status.weeks_remaining = 2 + Math.floor(Math.random() * 4);
+            const roleDef = p.roles ? p.roles.map(r => RoleService.getRoleDefinition(r).modifiers(p)) : [];
+            const injuryResist = roleDef.reduce((sum, m) => sum + (m.injuryResistance || 0), 0);
+
+            // Feature 5: Red Zone Logic
+            const inRedZone = p.chronic_fatigue > 40 && p.fitness < 90;
+            const redZoneMult = inRedZone ? 5 : (p.fitness < 75 ? 2 : 1);
+            const chronicFactor = 1 + (p.chronic_fatigue / 20);
+
+            if (Math.random() < 0.0005 * p.injury_status.proneness * redZoneMult * chronicFactor * (1 - injuryReduction) * (1 - injuryResist)) {
+                // Severity Upgrade
+                const isMajor = inRedZone && Math.random() < 0.3;
+                p.injury_status.type = isMajor ? "broken_leg" : "hamstring";
+                p.injury_status.weeks_remaining = isMajor ? 12 + Math.floor(Math.random() * 20) : 2 + Math.floor(Math.random() * 4);
             }
         }
     });
@@ -733,40 +1008,210 @@ const processNegotiations = (state: GameState): Negotiation[] => {
 
 const generateAiTransferActivity = (state: GameState): { news: NewsItem[], transfers: any[] } => {
     const news: NewsItem[] = [];
-    const transfers = [];
-    if (Math.random() > 0.05) return { news, transfers };
+    const transfers: any[] = [];
+
+    if (!isTransferWindow(state.currentDate)) return { news, transfers };
 
     const allClubs = Object.values(state.leagues).flatMap(l => l.clubs);
-    const buyer = allClubs[Math.floor(Math.random() * allClubs.length)];
-    const targetOverall = buyer.reputation > 80 ? 85 : 75;
-    const seller = allClubs.find(c => c.id !== buyer.id && c.leagueId === buyer.leagueId && c.players.some(p => p.overall >= targetOverall && p.transfer_status !== 'not_for_sale'));
+    // Filter potential buyers - exclude player club
+    const potentialBuyers = allClubs
+        .filter(c => c.id !== state.playerClubId)
+        .sort(() => 0.5 - Math.random()); // Shuffle
 
-    if (seller) {
-        const player = seller.players.find(p => p.overall >= targetOverall);
-        if (player && buyer.budget > player.market_value) {
-            // Rep Check AI
-            if (player.reputation > buyer.reputation + 15) return { news, transfers };
+    let dailyTransfers = 0;
+    const MAX_DAILY_TRANSFERS = 3;
 
-            buyer.budget -= player.market_value;
-            buyer.season_financials.transfer_spend += player.market_value;
+    for (const buyer of potentialBuyers) {
+        if (dailyTransfers >= MAX_DAILY_TRANSFERS) break;
+        if (buyer.players.length >= 30) continue;
+        if (buyer.budget < 1000000) continue;
 
-            seller.budget += player.market_value;
-            seller.season_financials.transfer_income += player.market_value;
+        // 1. Analyze Needs
+        const need = getSquadNeeds(buyer);
+        if (!need) continue;
 
-            seller.players = seller.players.filter(p => p.id !== player.id);
-            player.clubId = buyer.id;
-            buyer.players.push(player);
+        // Chance to act
+        const actChance = 0.05 + (need.priority * 0.02);
+        if (Math.random() > actChance) continue;
 
-            news.push({
-                id: Date.now(),
-                date: state.currentDate,
-                headline: `DONE DEAL: ${player.name} joins ${buyer.name}`,
-                content: `${buyer.name} have completed the signing of ${player.name} from ${seller.name} for £${(player.market_value / 1000000).toFixed(1)}M.`,
-                image_type: 'transfer',
-                clubId: buyer.id
-            });
+        // 2. Find Targets
+        const candidates = allClubs
+            .flatMap(c => c.players)
+            .filter(p =>
+                p.clubId !== buyer.id &&
+                p.clubId !== state.playerClubId &&
+                p.market_value <= buyer.budget * 1.1 &&
+                p.transfer_status !== 'not_for_sale'
+            );
+
+        const rankedTargets = candidates
+            .map(p => ({ player: p, score: scoreTransferTarget(p, buyer, need.position) }))
+            .filter(t => t.score > 50)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 5);
+
+        if (rankedTargets.length === 0) continue;
+
+        const selected = rankedTargets[0].player;
+        const seller = allClubs.find(c => c.id === selected.clubId);
+        if (!seller) continue;
+
+        // 3. Negotiate
+        const feeVariance = 0.9 + (Math.random() * 0.4);
+        let finalFee = Math.floor(selected.market_value * feeVariance);
+        if (selected.overall > 82) finalFee = Math.floor(finalFee * 1.2);
+
+        if (buyer.budget < finalFee) continue;
+
+        // Execute
+        buyer.budget -= finalFee;
+        buyer.season_financials.transfer_spend += finalFee;
+        seller.budget += finalFee;
+        seller.season_financials.transfer_income += finalFee;
+
+        seller.players = seller.players.filter(p => p.id !== selected.id);
+        selected.clubId = buyer.id;
+        selected.salary = Math.floor(selected.salary * (1.2 + (Math.random() * 0.3)));
+        buyer.players.push(selected);
+
+        // Feature 4: Domino Effect (Chain Reaction)
+        if (finalFee > 50000000) {
+             const replacementSearch = (sellingClub: Club, position: string, depth: number) => {
+                 if (depth > 2) return; // Max recursion limit
+
+                 // Panic buy logic: Willing to pay 1.5x valuation
+                 const targets = allClubs.flatMap(c => c.players).filter(p =>
+                     p.clubId !== sellingClub.id &&
+                     p.clubId !== state.playerClubId &&
+                     p.position === position &&
+                     p.market_value * 1.5 <= sellingClub.budget
+                 ).sort((a,b) => b.overall - a.overall).slice(0, 3);
+
+                 if (targets.length > 0) {
+                     const target = targets[0]; // Best available
+                     const targetClub = allClubs.find(c => c.id === target.clubId);
+                     if (targetClub) {
+                         // Instant Buy
+                         const dominoFee = Math.floor(target.market_value * 1.5);
+                         sellingClub.budget -= dominoFee;
+                         targetClub.budget += dominoFee;
+                         target.clubId = sellingClub.id;
+                         targetClub.players = targetClub.players.filter(p => p.id !== target.id);
+                         sellingClub.players.push(target);
+
+                         news.push({
+                             id: Date.now() + Math.random(),
+                             date: state.currentDate,
+                             headline: `DOMINO EFFECT: ${sellingClub.name} REPLACE STAR`,
+                             content: `Panic buy! ${sellingClub.name} have immediately signed ${target.name} from ${targetClub.name} for £${(dominoFee/1000000).toFixed(1)}M to fill the void.`,
+                             image_type: 'transfer',
+                             subType: 'rumour',
+                             importance: 8,
+                             clubId: sellingClub.id
+                         });
+
+                         // Recurse
+                         replacementSearch(targetClub, position, depth + 1);
+                     }
+                 }
+             };
+             replacementSearch(seller, selected.position, 0);
+        }
+
+        dailyTransfers++;
+
+        // 4. News
+        let headlineTemplate = TRANSFER_HEADLINES.STANDARD;
+        let subType: NewsItem['subType'] = 'statement';
+        let sentiment: 'neutral' | 'positive' | 'negative' = 'neutral';
+        let importance = 5;
+
+        if (finalFee > 80000000) {
+            headlineTemplate = TRANSFER_HEADLINES.RECORD;
+            subType = 'punditry';
+            importance = 10;
+            sentiment = 'positive';
+        } else if (finalFee < selected.market_value * 0.8) {
+            headlineTemplate = TRANSFER_HEADLINES.BARGAIN;
+            subType = 'tactical_analysis';
+            importance = 6;
+            sentiment = 'positive';
+        } else if (selected.age < 21 && selected.potential > 85) {
+            headlineTemplate = TRANSFER_HEADLINES.PROSPECT;
+            subType = 'rumour';
+            importance = 7;
+            sentiment = 'positive';
+        } else if (selected.age > 32) {
+            headlineTemplate = TRANSFER_HEADLINES.VETERAN;
+            importance = 4;
+        }
+
+        const formatHeadline = (str: string) => str
+            .replace('{buyer}', buyer.name)
+            .replace('{player}', selected.name)
+            .replace('{fee}', (finalFee/1000000).toFixed(1));
+
+        news.push({
+            id: Date.now() + Math.random(),
+            date: state.currentDate,
+            headline: formatHeadline(pick(headlineTemplate)),
+            content: `${pick(CONTENT.TRANSFER_GENERIC).replace('{age}', selected.age.toString()).replace('{player}', selected.name).replace('{wage}', (selected.salary/1000).toFixed(0))} The transfer fee is reported to be £${(finalFee/1000000).toFixed(1)}M.`,
+            image_type: 'transfer',
+            subType,
+            sentiment,
+            importance,
+            clubId: buyer.id,
+            meta: {
+                source: pick(NEWS_SOURCES),
+                tag: '#Official',
+                likes: Math.floor(Math.random() * 50000),
+                comments: Math.floor(Math.random() * 2000),
+                reaction: sentiment === 'positive' ? "Incredible signing!" : "Interesting move."
+            }
+        });
+
+        // Chain Reaction (Simplified)
+        const sellerNeeds = getSquadNeeds(seller);
+        if (sellerNeeds && sellerNeeds.position === selected.position && seller.budget > 2000000 && Math.random() < 0.7) {
+             const replacementCandidates = allClubs
+                .flatMap(c => c.players)
+                .filter(p =>
+                    p.clubId !== seller.id && p.clubId !== buyer.id && p.clubId !== state.playerClubId &&
+                    p.position === selected.position && p.market_value <= seller.budget * 0.9
+                )
+                .sort((a,b) => b.overall - a.overall)
+                .slice(0, 3);
+
+            if (replacementCandidates.length > 0) {
+                const replacement = pick(replacementCandidates);
+                const seller2 = allClubs.find(c => c.id === replacement.clubId);
+
+                if (seller2) {
+                    const fee2 = Math.floor(replacement.market_value * 1.1);
+                    seller.budget -= fee2;
+                    seller.season_financials.transfer_spend += fee2;
+                    seller2.budget += fee2;
+                    seller2.season_financials.transfer_income += fee2;
+
+                    seller2.players = seller2.players.filter(p => p.id !== replacement.id);
+                    replacement.clubId = seller.id;
+                    seller.players.push(replacement);
+
+                    news.push({
+                        id: Date.now() + Math.random() + 10,
+                        date: state.currentDate,
+                        headline: pick(TRANSFER_HEADLINES.CHAIN).replace('{buyer}', seller.name).replace('{player}', replacement.name),
+                        content: `Acting swiftly after selling ${selected.name}, ${seller.name} have triggered a release clause for ${replacement.name} from ${seller2.name}.`,
+                        image_type: 'transfer',
+                        subType: 'rumour',
+                        importance: Math.max(4, importance - 2),
+                        clubId: seller.id
+                    });
+                }
+            }
         }
     }
+
     return { news, transfers };
 };
 
@@ -799,81 +1244,51 @@ export const generateGala = (state: GameState): GalaData => {
     if (!playerClub) throw new Error("Player club not found");
 
     const league = state.leagues[playerClub.leagueId];
-    const allPlayers = league.clubs.flatMap(c => c.players);
-
-    const topScorer = [...allPlayers].sort((a, b) => b.season_stats.goals - a.season_stats.goals)[0];
-    const playmaker = [...allPlayers].sort((a, b) => b.season_stats.assists - a.season_stats.assists)[0];
-    const poty = [...allPlayers].filter(p => p.season_stats.appearances > 15).sort((a, b) => b.season_stats.avg_rating - a.season_stats.avg_rating)[0];
-    const ypos = [...allPlayers].filter(p => p.age <= 21 && p.season_stats.appearances > 10).sort((a, b) => b.season_stats.avg_rating - a.season_stats.avg_rating)[0];
-
-    const champion = [...league.clubs].sort((a, b) => b.stats.points - a.stats.points)[0];
-    const playerPos = [...league.clubs].sort((a, b) => b.stats.points - a.stats.points).findIndex(c => c.id === playerClub.id) + 1;
-
-    const history = state.news
-        .filter(n => n.importance && n.importance >= 8 && (n.clubId === playerClub.id || n.clubId === champion.id))
-        .slice(0, 5)
-        .map(n => ({ date: n.date, event: n.headline }));
-
-    return {
-        season: `${state.currentSeasonStartYear}/${state.currentSeasonStartYear + 1}`,
-        leagueName: league.name,
-        championId: champion.id,
-        playerPos,
-        awards: {
-            poty: { name: poty?.name || "N/A", club: getClubName(state, poty?.clubId), value: `${poty?.season_stats.avg_rating.toFixed(2)} Rating` },
-            ypos: { name: ypos?.name || "N/A", club: getClubName(state, ypos?.clubId), value: `${ypos?.season_stats.avg_rating.toFixed(2)} Rating` },
-            goldenBoot: { name: topScorer?.name || "N/A", club: getClubName(state, topScorer?.clubId), value: topScorer?.season_stats.goals || 0 },
-            playmaker: { name: playmaker?.name || "N/A", club: getClubName(state, playmaker?.clubId), value: playmaker?.season_stats.assists || 0 }
-        },
-        history
-    };
+    return AwardsEngine.calculateSeasonAwards(state, league);
 }
 
 // --- LIVING WORLD ENGINE ---
 
 export const processManagerMovement = (state: GameState) => {
-    if (Math.random() > 0.01) return; // Rare event
+    Object.values(state.leagues).forEach(league => {
+        league.clubs.forEach(club => {
+            if (club.id === state.playerClubId) return;
 
-    const allClubs = Object.values(state.leagues).flatMap(l => l.clubs);
-    const vulnerableClubs = allClubs.filter(c => c.job_security < 10 && c.id !== state.playerClubId);
+            const sortedTable = [...league.clubs].sort((a, b) => b.stats.points - a.stats.points);
+            const currentPos = sortedTable.findIndex(c => c.id === club.id) + 1;
 
-    if (vulnerableClubs.length > 0) {
-        const club = vulnerableClubs[Math.floor(Math.random() * vulnerableClubs.length)];
+            // If performing very badly relative to expectations
+            if (currentPos > club.board_expectations.league_position_target + 6 && Math.random() < 0.005) {
+                const newStyles = ['Gegenpress', 'Tiki Taka', 'Catenaccio', 'Route One', 'Fluid Counter'];
+                const newStyle = newStyles[Math.floor(Math.random() * newStyles.length)];
 
-        // Sack Manager
-        state.news.unshift({
-            id: Date.now(),
-            date: state.currentDate,
-            headline: `SACKED: ${club.name} Part Ways with Manager`,
-            content: `Following a string of poor results, ${club.name} have announced the departure of their manager.`,
-            image_type: 'general',
-            clubId: club.id
+                club.style_identity.play_style = newStyle;
+                club.job_security = 100; // Reset
+
+                // New Manager Bounce
+                club.players.forEach(p => p.form = Math.min(100, p.form + 15));
+
+                state.news.unshift({
+                    id: Date.now() + Math.random(),
+                    date: state.currentDate,
+                    headline: `SACKED! ${club.name} part ways with manager`,
+                    content: `After a disastrous run of form leaving them in ${currentPos}th, ${club.name} have acted decisively. The new boss is expected to bring a '${newStyle}' philosophy to the club.`,
+                    image_type: 'general',
+                    subType: 'statement',
+                    sentiment: 'negative',
+                    importance: 9,
+                    clubId: club.id,
+                    meta: {
+                        source: { name: 'Club Official', tier: 'Tier 0' },
+                        tag: '#SackRace',
+                        likes: Math.floor(Math.random() * 10000),
+                        comments: 500,
+                        reaction: "About time!"
+                    }
+                });
+            }
         });
-
-        // Hire New Manager (Simplified)
-        const newManagerRep = club.reputation;
-        club.job_security = 60; // Reset
-        club.tactics = {
-            formation: Math.random() > 0.5 ? "4-3-3" : "4-4-2",
-            instructions: {
-                line_height: 40 + Math.random() * 40,
-                passing_directness: 40 + Math.random() * 40,
-                pressing_intensity: 40 + Math.random() * 40,
-                tempo: 40 + Math.random() * 40
-            },
-            lineup: [],
-            familiarity: 50
-        };
-
-        state.news.unshift({
-            id: Date.now() + 1,
-            date: state.currentDate,
-            headline: `APPOINTED: New Boss at ${club.name}`,
-            content: `${club.name} have acted quickly to appoint a new manager to steady the ship.`,
-            image_type: 'general',
-            clubId: club.id
-        });
-    }
+    });
 };
 
 export const processGlobalEconomy = (state: GameState) => {
@@ -934,6 +1349,7 @@ export const transitionSeason = (state: GameState): GameState => {
             champion.trophies.push({ id: Date.now(), name: `${league.name} Winner`, season: seasonLabel, date_won: state.currentDate });
             updateClubReputation(champion, 5, "League Title", state.messages, state.currentDate);
             updateFanHappiness(champion, 15);
+            ReputationEngine.updateReputation(newState.manager, { champion: true });
         }
 
         league.fixtures = [];
@@ -966,6 +1382,7 @@ export const transitionSeason = (state: GameState): GameState => {
         league.clubs.forEach(c => {
             c.players.forEach(p => {
                 p.age += 1;
+                p.years_at_club = (p.years_at_club || 0) + 1;
                 if (p.age < 24 && p.potential > p.overall) p.overall = Math.min(p.potential, p.overall + Math.floor(Math.random() * 3) + 1);
                 else if (p.age > 31) p.overall = Math.max(40, p.overall - 2);
             });
@@ -998,11 +1415,11 @@ export const transitionSeason = (state: GameState): GameState => {
             }
         });
 
-        const newDates = getSeasonDates(nextYear);
-        league.fixtures = generateFixtures(league.clubs, league.name, newDates.PL_MATCH_DATES);
+        // Fixtures are generated centrally now
+        league.fixtures = [];
     });
 
-    injectCupFixtures(newState.leagues, nextYear);
+    CompetitionSystem.initializeSeason(Object.values(newState.leagues));
     newState.currentSeasonStartYear = nextYear;
     newState.currentDate = `${nextYear}-07-01`;
 
@@ -1013,6 +1430,17 @@ export const transitionSeason = (state: GameState): GameState => {
         content: `The new season is underway! Analysts predict an inflation rate of ${(newState.leagues["Premier League"].inflation_rate * 100).toFixed(1)}% this year.`,
         image_type: 'match'
     });
+
+    const levelUp = ReputationEngine.checkLevelUp(newState.manager);
+    if (levelUp.leveledUp) {
+        newState.news.unshift({
+            id: Date.now() + 1,
+            date: newState.currentDate,
+            headline: `REPUTATION LEVEL UP: ${levelUp.name.toUpperCase()}`,
+            content: `Your managerial standing has increased to Level ${levelUp.newLevel}. Better clubs will now be interested in your services.`,
+            image_type: 'general'
+        });
+    }
 
     return newState;
 };
@@ -1054,8 +1482,108 @@ export const processDay = (state: GameState): { newState: GameState, events: str
     const dailyStories = NewsEngine.generateDailyStories(newState);
     newNews.push(...dailyStories);
 
-    // ADVANCED AI: Deep Simulation (Transfers, Managers, Economy)
-    AdvancedEngine.processDailyEvents(newState, newNews);
+    // Feature 3: Interactive Media
+    if (Math.random() < 0.05) {
+        const interview = InteractionEngine.generatePressConference(newState);
+        newNews.push({
+            id: Date.now() + Math.random(),
+            date: state.currentDate,
+            headline: "MEDIA REQUEST: Press Conference",
+            content: "The media have gathered for your comments on recent events.",
+            image_type: 'general',
+            subType: 'statement',
+            importance: 9,
+            interactionData: interview
+        });
+    }
+
+    // MONTHLY AWARDS (1st of Month)
+    const currentDay = new Date(state.currentDate).getDate();
+    if (currentDay === 1 && state.currentDate !== '2025-07-01') {
+        Object.values(newState.leagues).forEach(league => {
+             const award = AwardsEngine.calculateMonthlyAwards(league, state.currentDate);
+             if (!league.monthly_awards) league.monthly_awards = [];
+             league.monthly_awards.unshift(award);
+             AwardsEngine.resetMonthlyStats(league);
+
+             // Update player history
+             const winner = league.clubs.flatMap(c => c.players).find(p => p.name === award.playerOfTheMonth.name);
+             if (winner) {
+                 if (!winner.awards) winner.awards = [];
+                 winner.awards.push(`Player of the Month (${award.month})`);
+             }
+
+             newNews.push({
+                 id: Date.now() + Math.random(),
+                 date: state.currentDate,
+                 headline: `POTM: ${award.playerOfTheMonth.name}`,
+                 content: `${award.playerOfTheMonth.name} (${award.playerOfTheMonth.club}) wins Player of the Month with a rating of ${award.playerOfTheMonth.value}.`,
+                 image_type: 'award',
+                 clubId: undefined
+             });
+        });
+    }
+
+    // BALLON D'OR (Jan 1st)
+    if (currentMonth === 0 && currentDay === 1) {
+        const winner = AwardsEngine.calculateBallonDor(newState);
+        if (winner) {
+            newState.ballonDorHistory = newState.ballonDorHistory || [];
+            newState.ballonDorHistory.unshift(winner);
+            newNews.push({
+                 id: Date.now(),
+                 date: state.currentDate,
+                 headline: `BALLON D'OR: ${winner.name}`,
+                 content: `The world's best player is ${winner.name} from ${winner.club}.`,
+                 image_type: 'award'
+            });
+        }
+    }
+
+    // DAILY MECHANICS
+    processManagerMovement(newState);
+
+    // Yearly Regens (March 15th)
+    const date = new Date(state.currentDate);
+    if (date.getMonth() === 2 && date.getDate() === 15) {
+        let bestRegen: Player | null = null;
+        Object.values(newState.leagues).forEach(league => {
+            league.clubs.forEach(club => {
+                const facilityLevel = club.infrastructure.youth_academy.level;
+                const numPlayers = 2 + Math.floor(Math.random() * 2);
+                for (let i = 0; i < numPlayers; i++) {
+                    const basePot = 60 + (facilityLevel * 3);
+                    const variance = Math.floor(Math.random() * 20) - 5;
+                    const potential = Math.min(99, basePot + variance);
+                    const overall = Math.floor(potential * 0.6);
+                    const positions = ["GK", "DEF", "MID", "FWD", "ST"] as const;
+                    const pos = positions[Math.floor(Math.random() * positions.length)];
+                    const newId = Date.now() + Math.floor(Math.random() * 100000);
+                    const regen = generatePlayer(newId, club.id, pos, overall, 16);
+                    regen.potential = potential;
+                    regen.name = getRandomName();
+                    regen.squad_role = "prospect";
+                    regen.market_value = 0;
+                    club.players.push(regen);
+                    if (!bestRegen || regen.potential > bestRegen.potential) bestRegen = regen;
+                }
+            });
+        });
+        if (bestRegen) {
+             const club = Object.values(newState.leagues).flatMap(l => l.clubs).find(c => c.id === (bestRegen as Player).clubId);
+             newNews.push({
+                id: Date.now(),
+                date: state.currentDate,
+                headline: "NxGn: The Class of '25 Arrives",
+                content: `Youth intake day has arrived. Scouts are raving about a 16-year-old prospect at ${club?.name}, touted as the 'Next Big Thing'.`,
+                image_type: 'award',
+                subType: 'punditry',
+                sentiment: 'positive',
+                importance: 10,
+                meta: { source: { name: 'Wonderkid Watch', tier: 'Tier 1' }, tag: '#NxGn', likes: 90000, comments: 2000, reaction: "Remember the name!" }
+            });
+        }
+    }
 
     Object.keys(newState.leagues).forEach(leagueName => {
         const league = newState.leagues[leagueName];
@@ -1093,6 +1621,7 @@ export const processDay = (state: GameState): { newState: GameState, events: str
                     fixture.played = true;
                     fixture.homeScore = result.homeGoals;
                     fixture.awayScore = result.awayGoals;
+                    fixture.momentum_history = result.momentumHistory;
 
                     // NEW: Generate Context-Aware Match Report
                     const matchReports = NewsEngine.generateMatchNews(fixture, homeClub, awayClub, league);
@@ -1111,9 +1640,35 @@ export const processDay = (state: GameState): { newState: GameState, events: str
                             club.stats.played += 1;
                             club.stats.goalsFor += scored;
                             club.stats.goalsAgainst += conceded;
-                            if (isWin) { club.stats.won += 1; club.stats.points += 3; club.budget += 50000; }
-                            else if (isDraw) { club.stats.drawn += 1; club.stats.points += 1; }
-                            else { club.stats.lost += 1; }
+                            if (isWin) {
+                                club.stats.won += 1;
+                                club.stats.points += 3;
+                                club.budget += 50000;
+                                club.stats.current_unbeaten_streak = (club.stats.current_unbeaten_streak || 0) + 1;
+                            }
+                            else if (isDraw) {
+                                club.stats.drawn += 1;
+                                club.stats.points += 1;
+                                club.stats.current_unbeaten_streak = (club.stats.current_unbeaten_streak || 0) + 1;
+                            }
+                            else {
+                                club.stats.lost += 1;
+                                club.stats.current_unbeaten_streak = 0;
+                            }
+
+                            if (club.stats.current_unbeaten_streak > (club.stats.max_unbeaten_streak || 0)) {
+                                club.stats.max_unbeaten_streak = club.stats.current_unbeaten_streak;
+                                if (club.id === state.playerClubId && club.stats.max_unbeaten_streak >= 10 && club.stats.max_unbeaten_streak % 5 === 0) {
+                                     newNews.push({
+                                         id: Date.now() + Math.random(),
+                                         date: state.currentDate,
+                                         headline: `UNBEATEN RUN: ${club.name} reach ${club.stats.max_unbeaten_streak} games without defeat`,
+                                         content: `The team is showing incredible resilience.`,
+                                         image_type: 'match',
+                                         clubId: club.id
+                                     });
+                                }
+                            }
                         };
                         updateStats(homeClub, result.homeGoals, result.awayGoals, homeWin, draw);
                         updateStats(awayClub, result.awayGoals, result.homeGoals, awayWin, draw);
@@ -1133,6 +1688,25 @@ export const processDay = (state: GameState): { newState: GameState, events: str
                         const playerTeam = homeClub.id === state.playerClubId ? homeClub : awayClub;
                         const goalDiff = playerTeam.id === homeClub.id ? (result.homeGoals - result.awayGoals) : (result.awayGoals - result.homeGoals);
 
+                        // Manager Career Stats
+                        if (newState.manager.career) {
+                            newState.manager.career.matches_managed++;
+                            if (goalDiff > 0) newState.manager.career.wins++;
+                            else if (goalDiff === 0) newState.manager.career.draws++;
+                            else newState.manager.career.losses++;
+
+                            const milestones = [100, 250, 500, 1000];
+                            if (milestones.includes(newState.manager.career.matches_managed)) {
+                                newNews.push({
+                                    id: Date.now() + Math.random(),
+                                    date: state.currentDate,
+                                    headline: `MILESTONE: ${newState.manager.name} Manages ${newState.manager.career.matches_managed}th Game`,
+                                    content: `A significant achievement for the manager.`,
+                                    image_type: 'award'
+                                });
+                            }
+                        }
+
                         if (goalDiff > 0) {
                             playerTeam.job_security = Math.min(100, playerTeam.job_security + 3);
                             updateFanHappiness(playerTeam, 2);
@@ -1145,15 +1719,18 @@ export const processDay = (state: GameState): { newState: GameState, events: str
                     if (homeClub.infrastructure) {
                         const attendancePct = Math.min(1, (homeClub.reputation / 100) + (Math.random() * 0.2));
 
-                        // DYNAMIC WORLD: Attendance influenced by happiness and ticket price
+                        // DYNAMIC WORLD: Attendance influenced by happiness and ticket price strategy
                         const happinessFactor = homeClub.fan_happiness / 100;
-                        const priceSensitivity = 1 + Math.max(0, (homeClub.infrastructure.stadium.ticket_price - 45) / 100); // Standard price 45
-                        const dynamicAttendance = Math.floor(homeClub.infrastructure.stadium.capacity * attendancePct * happinessFactor / priceSensitivity);
+                        const priceMod = FinancialEngine.getAttendanceMod(homeClub);
+                        const ticketPrice = FinancialEngine.getTicketPrice(homeClub);
 
-                        const gateReceipts = dynamicAttendance * homeClub.infrastructure.stadium.ticket_price;
+                        const dynamicAttendance = Math.floor(homeClub.infrastructure.stadium.capacity * attendancePct * happinessFactor * priceMod);
+                        const finalAttendance = Math.min(homeClub.infrastructure.stadium.capacity, dynamicAttendance);
+
+                        const gateReceipts = finalAttendance * ticketPrice;
                         homeClub.budget += gateReceipts;
                         homeClub.season_financials.matchday_income += gateReceipts;
-                        homeClub.attendance_rate = dynamicAttendance / homeClub.infrastructure.stadium.capacity;
+                        homeClub.attendance_rate = finalAttendance / homeClub.infrastructure.stadium.capacity;
                     }
 
                     updatePlayersDaily(homeClub, true, fixture.competition, result.playerStats);
@@ -1212,6 +1789,30 @@ export const processDay = (state: GameState): { newState: GameState, events: str
                             });
                             updateClubReputation(winner, 5, "Cup Victory", newMessages, state.currentDate);
                             updateFanHappiness(winner, 20);
+
+                            if (winner.id === state.playerClubId && newState.manager.career) {
+                                newState.manager.career.trophies_won++;
+                            }
+
+                            // Cup Player of Tournament
+                            const allPlayers = league.clubs.flatMap(c => c.players);
+                            const cupName = fixture.competition;
+                            const cupBest = allPlayers
+                                .filter(p => p.competition_stats[cupName] && p.competition_stats[cupName].appearances >= 3)
+                                .sort((a,b) => b.competition_stats[cupName].avg_rating - a.competition_stats[cupName].avg_rating)[0];
+
+                            if (cupBest) {
+                                newNews.push({
+                                    id: Date.now() + Math.random(),
+                                    date: state.currentDate,
+                                    headline: `PLAYER OF TOURNAMENT: ${cupBest.name}`,
+                                    content: `${cupBest.name} voted best player of the ${cupName} with an average rating of ${cupBest.competition_stats[cupName].avg_rating.toFixed(2)}.`,
+                                    image_type: 'award',
+                                    clubId: cupBest.clubId
+                                });
+                                if (!cupBest.awards) cupBest.awards = [];
+                                cupBest.awards.push(`${cupName} Best Player (${state.currentSeasonStartYear})`);
+                            }
                         }
                     }
 
@@ -1236,6 +1837,10 @@ export const processDay = (state: GameState): { newState: GameState, events: str
                 generateSponsorOffers(c, state.currentDate);
                 processSocialDynamics(c, dayEvents);
 
+                // Feature 2: Active Training
+                const dayOfWeek = new Date(state.currentDate).getDay();
+                TrainingEngine.applyDailyTraining(c, dayOfWeek);
+
                 const sortedTable = [...league.clubs].sort((a, b) => b.stats.points - a.stats.points);
                 const leaguePos = sortedTable.findIndex(cl => cl.id === c.id) + 1;
                 const ownerUpdates = processOwnerLogic(c, leaguePos, state.currentDate);
@@ -1248,10 +1853,31 @@ export const processDay = (state: GameState): { newState: GameState, events: str
                 updatePlayersDaily(c, false, null);
             }
 
-            // Daily Wages
-            const dailyWages = c.wage_budget_weekly / 7;
-            c.budget -= dailyWages;
-            c.season_financials.wage_bill += dailyWages;
+            // Check Role Progression (Weekly on Mondays)
+            if (new Date(state.currentDate).getDay() === 1) {
+                c.players.forEach(p => {
+                    const { added } = RoleService.updatePlayerRoles(p, c);
+                    if (added.length > 0 && c.id === state.playerClubId) {
+                         added.forEach(role => {
+                             const def = RoleService.getRoleDefinition(role);
+                             if (def.tier >= 2) {
+                                 newNews.push({
+                                     id: Date.now() + Math.random(),
+                                     date: state.currentDate,
+                                     headline: `${p.name.toUpperCase()} DEVELOPS AS ${role.toUpperCase()}`,
+                                     content: `${p.name} has been recognized as a ${role} due to their recent performances and status within the club.`,
+                                     image_type: 'general',
+                                     clubId: c.id
+                                 });
+                             }
+                         });
+                    }
+                });
+            }
+
+            const roleMods = RoleService.getClubRoleModifiers(c);
+
+            FinancialEngine.processDailyFinances(c, roleMods, playedTodayLocal);
         });
 
         const takeover = generateTakeover(league.clubs);

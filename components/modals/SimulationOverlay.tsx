@@ -34,6 +34,11 @@ export const SimulationOverlay = () => {
         return fixtures;
     }, [state.leagues, state.currentDate]);
 
+    const playerMatch = todaysFixtures.find(f => f.homeClubId === playerClub?.id || f.awayClubId === playerClub?.id);
+    const lastMomentum = playerMatch?.momentum_history ? playerMatch.momentum_history[playerMatch.momentum_history.length - 1] : 0;
+    // Normalize momentum (-10 to 10) to percentage (0 to 100). 0 -> 50%.
+    const momentumPercent = 50 + (lastMomentum * 5);
+
     // --- CALENDAR LOGIC ---
     const calendarData = useMemo(() => {
         const current = new Date(state.currentDate);
@@ -60,10 +65,6 @@ export const SimulationOverlay = () => {
         const dateStr = date.toISOString().split('T')[0];
         return Object.values(state.leagues).some(l => l.fixtures.some(f => f.date === dateStr));
     };
-
-    // Filter for major events for the visualizer
-    const latestMajorEvent = recentEvents.find(e => e.includes('GOAL') || e.includes('RED CARD')) || null;
-    const isGoal = latestMajorEvent?.includes('GOAL');
 
     return (
         <div className="fixed inset-0 z-[100] bg-neutral-900/95 flex flex-col font-sans text-white overflow-hidden animate-in fade-in duration-300">
@@ -104,80 +105,60 @@ export const SimulationOverlay = () => {
                 <div className="flex-1 relative bg-neutral-900 flex flex-col items-center justify-center p-12">
 
                     <div className="relative z-10 w-full max-w-2xl flex flex-col items-center justify-center">
-
-                        {latestMajorEvent ? (
-                            <div key={latestMajorEvent} className="text-center animate-in zoom-in duration-300 bg-neutral-800 p-12 rounded-xl border border-white/10 shadow-2xl w-full max-w-lg">
-                                <div className="text-7xl mb-6 animate-bounce">
-                                    {isGoal ? '⚽' : '🟥'}
+                        <div className="w-full bg-neutral-950 rounded-xl border border-white/10 p-8 shadow-2xl">
+                            <div className="flex justify-between items-end mb-6">
+                                <div>
+                                    <h2 className="text-3xl font-oswald font-bold text-white uppercase tracking-wide">{calendarData.monthName}</h2>
+                                    <p className="text-neutral-500 font-mono text-sm">{calendarData.year}</p>
                                 </div>
-                                <h2 className="text-6xl font-black uppercase tracking-tight mb-4 font-oswald text-white">
-                                    {isGoal ? 'GOAL!' : 'RED CARD'}
-                                </h2>
-                                <div className="text-2xl text-emerald-400 font-bold font-oswald tracking-wide">
-                                    {latestMajorEvent.split('!')[1] || latestMajorEvent}
+                                <div className="text-right">
+                                    <div className="text-xs font-bold uppercase text-neutral-500 mb-1">Processing</div>
+                                    <div className="text-emerald-500 font-mono text-sm animate-pulse">
+                                        {state.simulation.statusText || "Running Algorithms..."}
+                                    </div>
                                 </div>
                             </div>
-                        ) : (
-                            // IDLE STATE - Calendar View
-                            <div className="w-full bg-neutral-950 rounded-xl border border-white/10 p-8 shadow-2xl">
-                                <div className="flex justify-between items-end mb-6">
-                                    <div>
-                                        <h2 className="text-3xl font-oswald font-bold text-white uppercase tracking-wide">{calendarData.monthName}</h2>
-                                        <p className="text-neutral-500 font-mono text-sm">{calendarData.year}</p>
-                                    </div>
-                                    <div className="text-right">
-                                        <div className="text-xs font-bold uppercase text-neutral-500 mb-1">Simulation Progress</div>
-                                        <div className="w-32 bg-neutral-800 h-1.5 rounded-full overflow-hidden">
-                                            <div className="h-full bg-emerald-500 transition-all duration-200" style={{ width: `${progress}%` }}></div>
-                                        </div>
-                                    </div>
-                                </div>
 
-                                {/* Calendar Grid */}
-                                <div className="grid grid-cols-7 gap-2 mb-2">
-                                    {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
-                                        <div key={d} className="text-center text-[10px] font-bold uppercase text-neutral-600 py-1">{d}</div>
-                                    ))}
-                                </div>
-                                <div className="grid grid-cols-7 gap-2">
-                                    {calendarData.days.map((date, i) => {
-                                        if (!date) return <div key={`empty-${i}`} className="aspect-square"></div>;
+                            {/* Calendar Grid */}
+                            <div className="grid grid-cols-7 gap-2 mb-2">
+                                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
+                                    <div key={d} className="text-center text-[10px] font-bold uppercase text-neutral-600 py-1">{d}</div>
+                                ))}
+                            </div>
+                            <div className="grid grid-cols-7 gap-2">
+                                {calendarData.days.map((date, i) => {
+                                    if (!date) return <div key={`empty-${i}`} className="aspect-square"></div>;
 
-                                        const dateStr = date.toISOString().split('T')[0];
-                                        const isToday = dateStr === state.currentDate;
-                                        const isPast = date < new Date(state.currentDate);
-                                        const hasMatch = hasFixturesOnDate(date);
+                                    const dateStr = date.toISOString().split('T')[0];
+                                    const isToday = dateStr === state.currentDate;
+                                    const isPast = date < new Date(state.currentDate);
+                                    const hasMatch = hasFixturesOnDate(date);
 
-                                        return (
-                                            <div
-                                                key={dateStr}
-                                                className={`aspect-square rounded border flex flex-col items-center justify-center relative transition-all
+                                    return (
+                                        <div
+                                            key={dateStr}
+                                            className={`aspect-square rounded border flex flex-col items-center justify-center relative transition-all
                                                ${isToday
-                                                        ? 'bg-emerald-600 border-emerald-400 shadow-lg shadow-emerald-900/50 scale-110 z-10'
-                                                        : isPast
-                                                            ? 'bg-neutral-900 border-white/5 text-neutral-600'
-                                                            : 'bg-neutral-800 border-white/10 text-neutral-400'
-                                                    }
+                                                    ? 'bg-emerald-600 border-emerald-400 shadow-lg shadow-emerald-900/50 scale-110 z-10'
+                                                    : isPast
+                                                        ? 'bg-neutral-900 border-white/5 text-neutral-600'
+                                                        : 'bg-neutral-800 border-white/10 text-neutral-400'
+                                                }
                                            `}
-                                            >
-                                                <span className={`text-sm font-bold font-mono ${isToday ? 'text-white' : ''}`}>{date.getDate()}</span>
+                                        >
+                                            <span className={`text-sm font-bold font-mono ${isToday ? 'text-white' : ''}`}>{date.getDate()}</span>
 
-                                                {/* Indicators */}
-                                                <div className="flex gap-0.5 mt-1">
-                                                    {hasMatch && (
-                                                        <div className={`w-1 h-1 rounded-full ${isToday ? 'bg-white' : 'bg-emerald-500'}`}></div>
-                                                    )}
-                                                </div>
+                                            {/* Indicators */}
+                                            <div className="flex gap-0.5 mt-1">
+                                                {hasMatch && (
+                                                    <div className={`w-1 h-1 rounded-full ${isToday ? 'bg-white' : 'bg-emerald-500'}`}></div>
+                                                )}
                                             </div>
-                                        );
-                                    })}
-                                </div>
-
-                                <div className="mt-6 pt-4 border-t border-white/5 text-center">
-                                    <p className="text-neutral-400 text-xs uppercase tracking-widest animate-pulse">Simulating Daily Activities...</p>
-                                </div>
+                                        </div>
+                                    );
+                                })}
                             </div>
-                        )}
+                        </div>
                     </div>
                 </div>
 
@@ -189,6 +170,35 @@ export const SimulationOverlay = () => {
                     </div>
 
                     <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3">
+                        {playerMatch && (
+                            <div className="mb-4 bg-neutral-900 border border-white/5 p-4 rounded-lg animate-in slide-in-from-right">
+                                <div className="flex justify-between items-center mb-2">
+                                    <span className="text-[10px] uppercase font-bold text-neutral-500">Live Tactics</span>
+                                    <span className="text-[10px] uppercase font-bold text-white bg-blue-600 px-2 rounded">
+                                        {playerClub?.tactics?.formation || "4-3-3"}
+                                    </span>
+                                </div>
+
+                                {/* Momentum Tug of War */}
+                                <div className="space-y-1">
+                                    <div className="flex justify-between text-[8px] uppercase font-bold text-neutral-500">
+                                        <span>Pressure</span>
+                                        <span>Control</span>
+                                    </div>
+                                    <div className="h-2 bg-neutral-800 rounded-full overflow-hidden flex">
+                                        <div
+                                            className="h-full bg-red-500 transition-all duration-500"
+                                            style={{ width: `${100 - momentumPercent}%` }}
+                                        ></div>
+                                        <div
+                                            className="h-full bg-emerald-500 transition-all duration-500"
+                                            style={{ width: `${momentumPercent}%` }}
+                                        ></div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         {todaysFixtures.length === 0 ? (
                             <div className="text-center py-12 text-neutral-600 uppercase font-bold">No Matches Today</div>
                         ) : (

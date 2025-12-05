@@ -16,9 +16,9 @@ const generateMeta = (tier: string, sentiment: 'positive' | 'negative' | 'neutra
     const comments = Math.floor(likes * (0.05 + Math.random() * 0.1));
     
     const reactions = {
-        positive: ["Huge result!", "Love to see it.", "We are back!", "Trust the process.", "What a player!"],
-        negative: ["Embarrassing.", "Board out.", "Players aren't trying.", "Disaster class.", "Sell him."],
-        neutral: ["Interesting development.", "Wait and see.", "Big if true.", "Tactical battle.", "Needs time."]
+        positive: ["Huge result!", "Love to see it.", "We are back!", "Trust the process.", "What a player!", "This is football!"],
+        negative: ["Embarrassing.", "Board out.", "Players aren't trying.", "Disaster class.", "Sell him.", "Refund the fans."],
+        neutral: ["Interesting development.", "Wait and see.", "Big if true.", "Tactical battle.", "Needs time.", "Could go either way."]
     };
 
     return {
@@ -116,13 +116,15 @@ export const NewsEngine = {
     generateDailyStories: (state: GameState): NewsItem[] => {
         const stories: NewsItem[] = [];
         const seed = Math.random();
-        if (seed > 0.4) return stories; // Limit frequency
+
+        // Slightly increased frequency logic handled by caller or random check
+        if (Math.random() > 0.6) return stories;
 
         const allClubs = Object.values(state.leagues).flatMap(l => l.clubs);
 
         // 1. SACK RACE (Managers under pressure)
         const crisisClub = allClubs.find(c => c.job_security < 35);
-        if (crisisClub && seed < 0.1) {
+        if (crisisClub && Math.random() < 0.15) {
             stories.push({
                 id: Date.now() + Math.random(),
                 date: state.currentDate,
@@ -139,7 +141,7 @@ export const NewsEngine = {
 
         // 2. TRANSFER SAGAS (Active Negotiations)
         const negotiation = state.negotiations.find(n => n.status === 'active' || n.status === 'agreed_fee');
-        if (negotiation && seed > 0.2 && seed < 0.3) {
+        if (negotiation && Math.random() < 0.2) {
             const player = allClubs.flatMap(c => c.players).find(p => p.id === negotiation.playerId);
             const buyingClub = allClubs.find(c => c.id === negotiation.buyingClubId);
             
@@ -163,39 +165,121 @@ export const NewsEngine = {
             }
         }
 
-        // 3. PLAYER UNREST
-        const unhappyPlayer = allClubs.flatMap(c => c.players).find(p => p.morale < 30 && p.overall > 80);
-        if (unhappyPlayer && seed > 0.3 && seed < 0.35) {
-             const club = allClubs.find(c => c.id === unhappyPlayer.clubId);
-             stories.push({
-                 id: Date.now() + Math.random(),
-                 date: state.currentDate,
-                 headline: format(pick(HEADLINES.PLAYER_UNREST), { player: unhappyPlayer.name, club: club?.name || 'the club' }),
-                 content: `${unhappyPlayer.name}'s body language in training has raised eyebrows. Rumours of a falling out with management are circulating.`,
-                 image_type: 'general',
-                 subType: 'scandal',
-                 sentiment: 'negative',
-                 importance: 9,
-                 clubId: club?.id,
-                 meta: generateMeta('Tier 3', 'negative')
-             });
+        // 3. INJURY CRISIS
+        const injuredClubs = allClubs.filter(c => c.players.filter(p => p.injury_status.type !== 'none').length >= 3);
+        if (injuredClubs.length > 0 && Math.random() < 0.2) {
+            const club = pick(injuredClubs);
+            const player = club.players.find(p => p.injury_status.type !== 'none' && p.squad_role === 'key') || club.players.find(p => p.injury_status.type !== 'none');
+
+            if (player) {
+                stories.push({
+                    id: Date.now() + Math.random(),
+                    date: state.currentDate,
+                    headline: format(pick(HEADLINES.INJURY_BLOW), { club: club.name, player: player.name }),
+                    content: format(pick(CONTENT.INJURY_DETAIL), { player: player.name }),
+                    image_type: 'injury',
+                    subType: 'scandal',
+                    sentiment: 'negative',
+                    importance: 7,
+                    clubId: club.id,
+                    meta: generateMeta('Medical Gazette', 'negative')
+                });
+            }
         }
 
-        // 4. PLAYER FORM (Punditry)
-        const inFormPlayer = allClubs.flatMap(c => c.players).find(p => p.season_stats.goals > 5 && p.form > 85);
-        if (inFormPlayer && seed > 0.35) {
-             const club = allClubs.find(c => c.id === inFormPlayer.clubId);
-             stories.push({
+        // 4. STREAKS (Form)
+        if (Math.random() < 0.15) {
+            const club = pick(allClubs);
+            const league = state.leagues[club.leagueId];
+            // Get last 5 played matches involving this club
+            const recent = league.fixtures
+                .filter(f => f.played && (f.homeClubId === club.id || f.awayClubId === club.id))
+                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                .slice(0, 5);
+
+            if (recent.length >= 3) {
+                const wins = recent.filter(f => {
+                    const isHome = f.homeClubId === club.id;
+                    return isHome ? (f.homeScore! > f.awayScore!) : (f.awayScore! > f.homeScore!);
+                }).length;
+                const losses = recent.filter(f => {
+                    const isHome = f.homeClubId === club.id;
+                    return isHome ? (f.homeScore! < f.awayScore!) : (f.awayScore! < f.homeScore!);
+                }).length;
+
+                if (wins >= 3) {
+                    stories.push({
+                        id: Date.now() + Math.random(),
+                        date: state.currentDate,
+                        headline: format(pick(HEADLINES.WINNING_STREAK), { club: club.name }),
+                        content: format(pick(CONTENT.STREAK_DETAIL), {}),
+                        image_type: 'match',
+                        subType: 'tactical_analysis',
+                        sentiment: 'positive',
+                        importance: 6,
+                        clubId: club.id,
+                        meta: generateMeta('Tactical View', 'positive')
+                    });
+                } else if (losses >= 3) {
+                    const manager = club.staff.find(s => s.role === 'assistant')?.name || 'The Manager'; // Fallback
+                    stories.push({
+                        id: Date.now() + Math.random(),
+                        date: state.currentDate,
+                        headline: format(pick(HEADLINES.LOSING_STREAK), { club: club.name, manager }),
+                        content: format(pick(CONTENT.CRISIS_DETAIL), {}),
+                        image_type: 'general',
+                        subType: 'punditry',
+                        sentiment: 'negative',
+                        importance: 8,
+                        clubId: club.id,
+                        meta: generateMeta('Fan TV', 'negative')
+                    });
+                }
+            }
+        }
+
+        // 5. YOUTH HYPE
+        if (Math.random() < 0.1) {
+            const youth = allClubs.flatMap(c => c.players).find(p => p.age <= 19 && p.potential > 85 && p.overall > 60 && Math.random() < 0.1);
+            if (youth) {
+                const club = allClubs.find(c => c.id === youth.clubId);
+                stories.push({
+                    id: Date.now() + Math.random(),
+                    date: state.currentDate,
+                    headline: format(pick(HEADLINES.YOUTH_HYPE), { player: youth.name, club: club?.name || 'Club' }),
+                    content: format(pick(CONTENT.YOUTH_DETAIL), { player: youth.name }),
+                    image_type: 'award',
+                    subType: 'scout_report',
+                    sentiment: 'positive',
+                    importance: 6,
+                    clubId: club?.id,
+                    meta: generateMeta('Youth Watch', 'positive')
+                });
+            }
+        }
+
+        // 6. MANAGER TALK (Random flavor)
+        if (Math.random() < 0.05) {
+            const club = pick(allClubs);
+            // Assuming we don't have manager names easily on Club, we use generic or specific if available
+            // Ah, Club has 'staff' but ManagerProfile is usually separate or implied.
+            // Let's use "The Manager" or specific if we can find it.
+            // In GameState, we have 'manager' (player) and 'aiManagers'.
+            // But Club object structure in types.ts doesn't explicitly have a named manager property?
+            // It has 'staff'.
+            // Let's just use "Manager" for now.
+
+            stories.push({
                 id: Date.now() + Math.random(),
                 date: state.currentDate,
-                headline: format(pick(HEADLINES.PLAYER_FORM), { player: inFormPlayer.name, club: club?.name || '' }),
-                content: `${inFormPlayer.name} has been in sensational form recently, contributing key goals and assists. Is he the best player in the league right now?`,
-                image_type: 'award',
-                subType: 'punditry',
-                sentiment: 'positive',
-                importance: 6,
-                clubId: club?.id,
-                meta: generateMeta('The Pundit', 'positive')
+                headline: format(pick(HEADLINES.MANAGER_TALK), { manager: `${club.name} Boss`, club: club.name }),
+                content: "In a fiery press conference today, the manager took aim at the fixture list and the media.",
+                image_type: 'general',
+                subType: 'statement',
+                sentiment: 'neutral',
+                importance: 4,
+                clubId: club.id,
+                meta: generateMeta('National Press', 'neutral')
             });
         }
 
