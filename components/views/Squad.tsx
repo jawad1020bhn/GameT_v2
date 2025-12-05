@@ -224,7 +224,10 @@ const TacticalBoard = ({ club, onUpdate }: { club: any, onUpdate: (t: any) => vo
                             { id: 'pressing_intensity', label: 'Pressing Intensity', minLabel: 'Stand Off', maxLabel: 'Gegenpress' },
                             { id: 'tempo', label: 'Tempo', minLabel: 'Patient', maxLabel: 'Urgent' },
                             { id: 'passing_directness', label: 'Passing Directness', minLabel: 'Short', maxLabel: 'Long' },
-                            { id: 'line_height', label: 'Defensive Line', minLabel: 'Deep', maxLabel: 'High' }
+                            { id: 'line_height', label: 'Defensive Line', minLabel: 'Deep', maxLabel: 'High' },
+                            { id: 'attacking_width', label: 'Attacking Width', minLabel: 'Narrow', maxLabel: 'Wide' },
+                            { id: 'creative_freedom', label: 'Creative Freedom', minLabel: 'Disciplined', maxLabel: 'Expressive' },
+                            { id: 'tackling_style', label: 'Tackling Aggression', minLabel: 'Cautious', maxLabel: 'Aggressive' }
                         ].map(setting => (
                             <div key={setting.id}>
                                 <div className="flex justify-between text-xs font-bold text-neutral-400 uppercase mb-2">
@@ -309,10 +312,91 @@ const TacticalBoard = ({ club, onUpdate }: { club: any, onUpdate: (t: any) => vo
     );
 };
 
+const MentorshipPanel = ({ club }: { club: any }) => {
+    const { dispatch } = useGame();
+
+    // Potential Mentors: Age >= 27, Prof > 60
+    const mentors = club.players.filter((p: Player) => p.age >= 27 && p.personality.professionalism >= 60);
+
+    // Potential Mentees: Age <= 23
+    const mentees = club.players.filter((p: Player) => p.age <= 23);
+
+    const [selectedMentee, setSelectedMentee] = useState<number | null>(null);
+
+    const handleAssign = (menteeId: number, mentorId: number | undefined) => {
+        dispatch({ type: 'ASSIGN_MENTOR', payload: { menteeId, mentorId } });
+        setSelectedMentee(null);
+    };
+
+    return (
+        <div className="flex-1 bg-neutral-900 border border-white/10 rounded-lg p-6 flex flex-col md:flex-row gap-6 animate-in fade-in overflow-hidden">
+            {/* MENTEES LIST */}
+            <div className="flex-1 flex flex-col gap-4 overflow-hidden">
+                <h3 className="text-white font-oswald uppercase text-lg">Young Prospects</h3>
+                <div className="overflow-y-auto custom-scrollbar flex-1 bg-neutral-950 rounded border border-white/5 p-2">
+                    {mentees.map((p: Player) => (
+                        <div key={p.id} className={`p-3 mb-2 rounded border cursor-pointer transition-colors ${selectedMentee === p.id ? 'bg-emerald-900/50 border-emerald-500' : 'bg-neutral-900 border-white/5 hover:border-white/20'}`}
+                            onClick={() => setSelectedMentee(p.id)}
+                        >
+                            <div className="flex justify-between items-center">
+                                <span className="font-bold text-white">{p.name} <span className="text-neutral-500 text-xs">({p.age})</span></span>
+                                <span className={`text-xs font-bold ${getPositionColor(p.position)}`}>{p.position}</span>
+                            </div>
+                            <div className="mt-2 text-xs text-neutral-400 flex justify-between">
+                                <span>Pot: {p.potential}</span>
+                                {p.mentorId ? (
+                                    <span className="text-blue-400">Mentored by {club.players.find((m: Player) => m.id === p.mentorId)?.name.split(' ').pop()}</span>
+                                ) : (
+                                    <span className="text-neutral-600">No Mentor</span>
+                                )}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+
+            {/* MENTORS LIST */}
+            <div className="flex-1 flex flex-col gap-4 overflow-hidden">
+                <h3 className="text-white font-oswald uppercase text-lg">Available Mentors</h3>
+                <div className="overflow-y-auto custom-scrollbar flex-1 bg-neutral-950 rounded border border-white/5 p-2">
+                    {selectedMentee ? (
+                        <>
+                            <div onClick={() => handleAssign(selectedMentee, undefined)} className="p-3 mb-2 rounded bg-red-900/20 border border-red-500/50 hover:bg-red-900/40 cursor-pointer text-center text-red-400 font-bold text-xs uppercase">
+                                Remove Mentor
+                            </div>
+                            {mentors.map((m: Player) => {
+                                // Simple compatibility check
+                                const mentee = club.players.find((p: Player) => p.id === selectedMentee);
+                                const diff = Math.abs(m.personality.ambition - (mentee?.personality.ambition || 50));
+                                const compatible = diff < 20;
+
+                                return (
+                                    <div key={m.id} onClick={() => handleAssign(selectedMentee, m.id)} className="p-3 mb-2 rounded bg-neutral-900 border border-white/5 hover:bg-neutral-800 cursor-pointer">
+                                        <div className="flex justify-between items-center mb-1">
+                                            <span className="font-bold text-white">{m.name}</span>
+                                            {compatible ? <span className="text-emerald-500 text-xs">High Synergy</span> : <span className="text-neutral-500 text-xs">Neutral</span>}
+                                        </div>
+                                        <div className="text-xs text-neutral-400 flex gap-4">
+                                            <span>Prof: {m.personality.professionalism}</span>
+                                            <span>Ldr: {m.personality.leadership}</span>
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </>
+                    ) : (
+                        <div className="h-full flex items-center justify-center text-neutral-500 text-sm italic">Select a prospect to assign a mentor</div>
+                    )}
+                </div>
+            </div>
+        </div>
+    )
+}
+
 export const Squad: React.FC = () => {
   const { playerClub, dispatch } = useGame();
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
-  const [mode, setMode] = useState<'roster' | 'tactics'>('roster');
+  const [mode, setMode] = useState<'roster' | 'tactics' | 'mentorship'>('roster');
 
   if (!playerClub) return null;
 
@@ -346,6 +430,13 @@ export const Squad: React.FC = () => {
                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
                  Tactics Board
              </button>
+             <button
+                onClick={() => setMode('mentorship')}
+                className={`px-4 py-2 text-xs font-bold uppercase rounded transition-all flex items-center gap-2 ${mode === 'mentorship' ? 'bg-purple-600 text-white shadow' : 'text-neutral-500 hover:text-white'}`}
+             >
+                 <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z" /></svg>
+                 Mentoring
+             </button>
         </div>
       </div>
 
@@ -353,6 +444,8 @@ export const Squad: React.FC = () => {
           <div className="flex-1 overflow-hidden">
               <TacticalBoard club={playerClub} onUpdate={handleTacticsUpdate} />
           </div>
+      ) : mode === 'mentorship' ? (
+          <MentorshipPanel club={playerClub} />
       ) : (
           <div className="bg-neutral-900 border border-white/10 rounded-t-lg overflow-hidden flex-1 flex flex-col shadow-2xl animate-in fade-in duration-300">
             <div className="overflow-x-auto custom-scrollbar flex-1 flex flex-col">
