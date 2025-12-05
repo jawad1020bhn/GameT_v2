@@ -12,6 +12,41 @@ export enum View {
   SETTINGS = 'settings'
 }
 
+export enum GrowthCurve {
+    EARLY_PEAKER = 'early',   // Peaks 18-23, declines fast after 29
+    STEADY = 'steady',        // Standard growth, peaks 24-28
+    LATE_BLOOMER = 'late',    // Slow start, growth spikes 24-29, lasts longer
+    ERRATIC = 'erratic'       // Random growth spurts or drops
+}
+
+export enum PlayerRole {
+  // Tier 1: Foundation
+  ACADEMY_GRADUATE = 'Academy Graduate',
+  EMERGING_TALENT = 'Emerging Talent',
+  SQUAD_PLAYER = 'Squad Player',
+  WORKHORSE = 'Workhorse',
+
+  // Tier 2: Established
+  CONSISTENT_PERFORMER = 'Consistent Performer',
+  MENTOR = 'Mentor',
+  FAN_FAVORITE = 'Fan Favorite',
+  CLUTCH_PLAYER = 'Clutch Player',
+  TACTICAL_ANCHOR = 'Tactical Anchor',
+
+  // Tier 3: Elite
+  TEAM_LEADER = 'Team Leader',
+  FRANCHISE_PLAYER = 'Franchise Player',
+  CLUB_ICON = 'Club Icon',
+  LEGACY_LEGEND = 'Legacy Legend',
+
+  // Specialized
+  WILDCARD = 'Wildcard',
+  ENFORCER = 'Enforcer',
+  CAPTAIN_MATERIAL = 'Captain Material',
+  SUPER_SUB = 'Super Sub',
+  VETERAN_PRESENCE = 'Veteran Presence'
+}
+
 export interface PlayerAttributes {
   pace: number;
   shooting: number;
@@ -79,7 +114,16 @@ export interface Player {
   on_loan: boolean;
   clubId: number;
   season_stats: PlayerStats;
+  monthly_stats?: PlayerStats;
   competition_stats: { [key: string]: PlayerStats };
+  roles: PlayerRole[];
+  growth_curve: GrowthCurve;
+  social_group: 'core' | 'outcast' | 'veteran' | 'youngster';
+  hierarchy_level: number; // 1-10
+  chronic_fatigue: number; // 0-100
+  years_at_club: number;
+  mentorId?: number;
+  awards: string[];
 }
 
 export interface ClubFacilities {
@@ -172,6 +216,23 @@ export interface SeasonFinancials {
   charity_contributions: number;
 }
 
+export interface FinancialStrategy {
+  ticket_pricing: 'very_low' | 'low' | 'normal' | 'high' | 'very_high';
+  merchandise_focus: 'local' | 'national' | 'global';
+  debt_repayment: 'minimum' | 'balanced' | 'aggressive';
+  wage_budget_allocation: number; // 40-80%
+}
+
+export interface ScoutAssignment {
+    id: string;
+    region: 'UK' | 'Europe' | 'South America' | 'Asia' | 'Global';
+    position: 'GK' | 'DEF' | 'MID' | 'FWD' | 'ALL';
+    scope: 'youth' | 'first_team';
+    weeks_remaining: number;
+    assigned_scout_id: number;
+    reports: number[];
+}
+
 export interface Trophy {
   id: number;
   name: string;
@@ -186,6 +247,9 @@ export interface Tactics {
     passing_directness: number;
     pressing_intensity: number;
     tempo: number;
+    attacking_width: number;
+    creative_freedom: number;
+    tackling_style: number;
   };
   lineup: number[];
   familiarity: number;
@@ -222,6 +286,7 @@ export interface Club {
   scouting: {
     network_quality: number;
     range: "local" | "national" | "continental" | "global";
+    assignments: ScoutAssignment[];
   };
   owner: {
     ambition: number;
@@ -254,6 +319,7 @@ export interface Club {
   };
   tactics?: Tactics;
   tactical_familiarity: number; // 0-100
+  financial_strategy: FinancialStrategy;
   staff: StaffMember[];
   rivalries: number[];
   players: Player[];
@@ -327,6 +393,7 @@ export interface League {
   clubs: Club[];
   fixtures: Fixture[];
   history: any[];
+  monthly_awards: MonthlyAward[];
 }
 
 export interface NewsItem {
@@ -389,6 +456,14 @@ export interface Negotiation {
   last_updated: string;
   next_response_date: string;
   agent_comments?: string;
+  dialogue_history?: NegotiationDialogue[];
+}
+
+export interface NegotiationDialogue {
+    speaker: 'agent' | 'club';
+    text: string;
+    sentiment: 'positive' | 'negative' | 'neutral';
+    timestamp: number;
 }
 
 export interface TransferOffer {
@@ -402,6 +477,9 @@ export interface ContractOffer {
   duration: number;
   signing_bonus: number;
   role: "key" | "star" | "important" | "rotation" | "prospect";
+  release_clause?: number;
+  performance_bonus?: number;
+  yearly_wage_rise?: number;
 }
 
 export interface StaffMember {
@@ -432,9 +510,50 @@ export interface ManagerProfile {
     financial_acumen: number;
     media_handling: number;
   };
-  reputation: number; // 0-10000
+  career: {
+    seasons_managed: number;
+    matches_managed: number;
+    wins: number;
+    draws: number;
+    losses: number;
+    trophies_won: number;
+    highest_league_finish: number | null;
+    european_experience: boolean;
+    clubs_managed: string[];
+  };
+  reputation: {
+    level: number;
+    name: string;
+    points: number;
+    points_needed: number;
+  };
   avatar_id: number;
   history: { season: string; clubId: number; achievement: string }[];
+  awards: string[];
+}
+
+export interface AwardWinner {
+    name: string;
+    club: string;
+    value: string;
+}
+
+export interface MonthlyAward {
+    id: string;
+    month: string;
+    year: number;
+    leagueId: string;
+    playerOfTheMonth: AwardWinner;
+    managerOfTheMonth: AwardWinner;
+    teamOfTheMonth: { position: string; name: string; club: string }[];
+}
+
+export interface BallonDorWinner {
+    year: number;
+    name: string;
+    club: string;
+    nationality: string;
+    rating: number;
 }
 
 export interface GalaData {
@@ -446,7 +565,30 @@ export interface GalaData {
     poty: { name: string, club: string, value: string };
     ypos: { name: string, club: string, value: string };
     goldenBoot: { name: string, club: string, value: number };
+    goldenGlove: { name: string, club: string, value: number };
     playmaker: { name: string, club: string, value: number };
+    breakthrough: { name: string, club: string, value: string };
+    managerOfTheSeason: { name: string, club: string, value: string };
+    clubOfTheYear: { name: string, value: string };
+    mostImprovedClub: { name: string, value: string };
+    bestAttack: { name: string, value: number };
+    bestDefense: { name: string, value: number };
+    teamOfTheSeason: { position: string; name: string; club: string }[];
+  };
+  uclAwards?: {
+    bestPlayer: { name: string, club: string, value: string };
+    topScorer: { name: string, club: string, value: number };
+  };
+  review?: {
+      objectives: {
+          league: { target: string, result: string, success: boolean };
+          cup: { target: string, result: string, success: boolean };
+          europe: { target: string, result: string, success: boolean };
+      };
+      board_score: number;
+      board_verdict: string;
+      stats: { played: number, wins: number, losses: number, goalDiff: number };
+      financials: { turnover: number, spend: number, income: number, wage_bill: number, budget_next: number };
   };
   history: { date: string, event: string }[];
 }
@@ -473,4 +615,5 @@ export interface GameState {
     liveStats?: any;
   };
   seasonGala?: GalaData;
+  ballonDorHistory: BallonDorWinner[];
 }
